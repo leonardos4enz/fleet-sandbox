@@ -3,7 +3,14 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { addTodo, app, resetTodos } from './app.js';
-import { assignLabelToTodo, createLabel, labelsForTodo, resetLabels, type Label } from './labels.js';
+import {
+  assignLabelToTodo,
+  createLabel,
+  deleteLabel,
+  labelsForTodo,
+  resetLabels,
+  type Label,
+} from './labels.js';
 
 // La versión esperada se lee del package.json real, no se escribe a mano,
 // para que el test siga siendo cierto cuando se suba la versión.
@@ -90,7 +97,7 @@ describe('stats sin tareas', () => {
   it('GET /stats devuelve total, done y pending en cero', async () => {
     const res = await fetch(`${base}/stats`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ total: 0, done: 0, pending: 0 });
+    expect(await res.json()).toEqual({ total: 0, done: 0, pending: 0, byLabel: {} });
   });
 });
 
@@ -696,7 +703,7 @@ describe('DELETE /todos', () => {
 
     const res = await fetch(`${base}/stats`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ total: 0, done: 0, pending: 0 });
+    expect(await res.json()).toEqual({ total: 0, done: 0, pending: 0, byLabel: {} });
   });
 });
 
@@ -1020,7 +1027,7 @@ describe('PATCH /todos/:id', () => {
 
     const res = await fetch(`${base}/stats`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ total: 1, done: 1, pending: 0 });
+    expect(await res.json()).toEqual({ total: 1, done: 1, pending: 0, byLabel: {} });
   });
 
   it('GET /stats refleja volver a dejar la tarea pendiente', async () => {
@@ -1030,7 +1037,7 @@ describe('PATCH /todos/:id', () => {
 
     const res = await fetch(`${base}/stats`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ total: 1, done: 0, pending: 1 });
+    expect(await res.json()).toEqual({ total: 1, done: 0, pending: 1, byLabel: {} });
   });
 });
 
@@ -1464,7 +1471,7 @@ describe('stats con tareas', () => {
 
     const res = await fetch(`${base}/stats`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ total: 3, done: 1, pending: 2 });
+    expect(await res.json()).toEqual({ total: 3, done: 1, pending: 2, byLabel: {} });
   });
 
   it('GET /stats coincide con el total de tareas listadas en GET /todos', async () => {
@@ -1478,6 +1485,83 @@ describe('stats con tareas', () => {
     expect(stats.total).toBe(todos.length);
     expect(stats.done).toBe(todos.filter((todo) => todo.done).length);
     expect(stats.pending).toBe(todos.filter((todo) => !todo.done).length);
+  });
+});
+
+describe('stats por etiqueta', () => {
+  // Crea una etiqueta y falla el test si no se pudo crear, para no tener que
+  // comprobar el null en cada uso.
+  const makeLabel = (name: string, color: string): Label => {
+    const label = createLabel(name, color);
+    if (label === null) throw new Error(`no se pudo crear la etiqueta ${name}`);
+    return label;
+  };
+
+  it('GET /stats cuenta las tareas de cada etiqueta', async () => {
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    const casa = makeLabel('casa', '#00ff00');
+    const primera = addTodo('Primera');
+    const segunda = addTodo('Segunda');
+    const tercera = addTodo('Tercera');
+    assignLabelToTodo(primera.id, trabajo.id);
+    assignLabelToTodo(segunda.id, trabajo.id);
+    assignLabelToTodo(tercera.id, casa.id);
+
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      total: 3,
+      done: 0,
+      pending: 3,
+      byLabel: { trabajo: 2, casa: 1 },
+    });
+  });
+
+  it('una etiqueta sin tareas aparece con 0', async () => {
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    makeLabel('casa', '#00ff00');
+    const todo = addTodo('Con etiqueta');
+    assignLabelToTodo(todo.id, trabajo.id);
+
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { byLabel: Record<string, number> };
+    expect(body.byLabel).toEqual({ trabajo: 1, casa: 0 });
+  });
+
+  it('sin etiquetas byLabel es un objeto vacío', async () => {
+    addTodo('Sin etiquetas');
+
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ total: 1, done: 0, pending: 1, byLabel: {} });
+  });
+
+  it('una tarea con dos etiquetas cuenta en las dos claves', async () => {
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    const casa = makeLabel('casa', '#00ff00');
+    const todo = addTodo('Con dos etiquetas');
+    assignLabelToTodo(todo.id, trabajo.id);
+    assignLabelToTodo(todo.id, casa.id);
+
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { byLabel: Record<string, number> };
+    expect(body.byLabel).toEqual({ trabajo: 1, casa: 1 });
+  });
+
+  it('tras borrar una etiqueta su clave desaparece de byLabel', async () => {
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    const casa = makeLabel('casa', '#00ff00');
+    const todo = addTodo('Con etiqueta');
+    assignLabelToTodo(todo.id, trabajo.id);
+
+    expect(deleteLabel(casa.id)).toBe(true);
+
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { byLabel: Record<string, number> };
+    expect(body.byLabel).toEqual({ trabajo: 1 });
   });
 });
 

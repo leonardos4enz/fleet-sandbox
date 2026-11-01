@@ -282,10 +282,28 @@ const deleteAllTodos = (_req: IncomingMessage, res: ServerResponse): void => {
   json(res, 200, { deleted });
 };
 
+// Conteo de tareas por etiqueta. Hay una clave por cada etiqueta que existe
+// (con 0 si ninguna tarea la tiene) y las claves son los nombres de las
+// etiquetas, así que al borrar una etiqueta su clave desaparece.
+const countTodosByLabel = (): Record<string, number> => {
+  const byLabel: Record<string, number> = {};
+  for (const label of listLabels()) {
+    byLabel[label.name] = 0;
+  }
+
+  for (const todo of todos) {
+    for (const label of labelsForTodo(todo.id)) {
+      byLabel[label.name] = (byLabel[label.name] ?? 0) + 1;
+    }
+  }
+
+  return byLabel;
+};
+
 const getStats = (_req: IncomingMessage, res: ServerResponse): void => {
   const total = todos.length;
   const done = todos.filter((todo) => todo.done).length;
-  json(res, 200, { total, done, pending: total - done });
+  json(res, 200, { total, done, pending: total - done, byLabel: countTodosByLabel() });
 };
 
 // Devuelve la tarea creada más recientemente.
