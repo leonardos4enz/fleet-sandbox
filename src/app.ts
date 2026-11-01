@@ -3,8 +3,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import {
   assignLabelToTodo,
   clearTodoLabels,
+  createLabel,
+  deleteLabel,
   findLabelById,
+  findLabelByName,
+  isValidHexColor,
+  isValidLabelName,
   labelsForTodo,
+  listLabels,
   removeLabelFromTodo,
   type Label,
 } from './labels.js';
@@ -296,14 +302,14 @@ const getLatestTodo = (_req: IncomingMessage, res: ServerResponse): void => {
 
 // Devuelve el id como entero positivo, o null si no lo es.
 // Solo se aceptan dígitos: "0", "-1", "1.5", "abc" o "" no son ids válidos.
-const parseTodoId = (raw: string): number | null => {
+const parseId = (raw: string): number | null => {
   if (!/^\d+$/.test(raw)) return null;
   const id = Number(raw);
   return Number.isSafeInteger(id) && id > 0 ? id : null;
 };
 
 const getTodoById = (params: RouteParams, res: ServerResponse): void => {
-  const id = parseTodoId(params['id'] ?? '');
+  const id = parseId(params['id'] ?? '');
   if (id === null) {
     json(res, 400, { error: 'invalid_id' });
     return;
@@ -374,7 +380,7 @@ const patchTodo = async (
   res: ServerResponse,
   params: RouteParams,
 ): Promise<void> => {
-  const id = parseTodoId(params['id'] ?? '');
+  const id = parseId(params['id'] ?? '');
   if (id === null) {
     json(res, 400, { error: 'invalid_id' });
     return;
@@ -399,7 +405,7 @@ const patchTodo = async (
 };
 
 const deleteTodoById = (params: RouteParams, res: ServerResponse): void => {
-  const id = parseTodoId(params['id'] ?? '');
+  const id = parseId(params['id'] ?? '');
   if (id === null) {
     json(res, 400, { error: 'invalid_id' });
     return;
@@ -421,8 +427,8 @@ const deleteTodoById = (params: RouteParams, res: ServerResponse): void => {
 // Asigna una etiqueta a una tarea. Es idempotente: si la tarea ya tenía la
 // etiqueta, la respuesta es la misma y la etiqueta no se duplica.
 const assignTodoLabel = (params: RouteParams, res: ServerResponse): void => {
-  const todoId = parseTodoId(params['id'] ?? '');
-  const labelId = parseTodoId(params['labelId'] ?? '');
+  const todoId = parseId(params['id'] ?? '');
+  const labelId = parseId(params['labelId'] ?? '');
   if (todoId === null || labelId === null) {
     json(res, 400, { error: 'invalid_id' });
     return;
@@ -446,8 +452,8 @@ const assignTodoLabel = (params: RouteParams, res: ServerResponse): void => {
 // Quita una etiqueta de una tarea. Es idempotente: si la tarea no tenía esa
 // etiqueta, la respuesta es la misma.
 const removeTodoLabel = (params: RouteParams, res: ServerResponse): void => {
-  const todoId = parseTodoId(params['id'] ?? '');
-  const labelId = parseTodoId(params['labelId'] ?? '');
+  const todoId = parseId(params['id'] ?? '');
+  const labelId = parseId(params['labelId'] ?? '');
   if (todoId === null || labelId === null) {
     json(res, 400, { error: 'invalid_id' });
     return;
@@ -468,6 +474,81 @@ const removeTodoLabel = (params: RouteParams, res: ServerResponse): void => {
   noContent(res);
 };
 
+// Body de POST /labels: el nombre y el color ya validados, o el error que
+// corresponde.
+type LabelBody =
+  | { name: string; color: string }
+  | { error: 'invalid_body' | 'invalid_name' | 'invalid_color' };
+
+// Lee el body de una etiqueta. Se valida primero el nombre y luego el color,
+// así que un nombre válido con un color inválido devuelve invalid_color.
+const parseLabelBody = async (req: IncomingMessage): Promise<LabelBody> => {
+  let raw: string;
+  try {
+    raw = await readBody(req);
+  } catch {
+    return { error: 'invalid_body' };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { error: 'invalid_body' };
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { error: 'invalid_body' };
+  }
+
+  const { name, color } = parsed as Record<string, unknown>;
+
+  if (!isValidLabelName(name)) return { error: 'invalid_name' };
+  if (!isValidHexColor(color)) return { error: 'invalid_color' };
+
+  return { name: name.trim(), color: color.trim() };
+};
+
+const createLabelRoute = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+  const body = await parseLabelBody(req);
+  if ('error' in body) {
+    json(res, 400, { error: body.error });
+    return;
+  }
+
+  if (findLabelByName(body.name) !== undefined) {
+    json(res, 409, { error: 'duplicate_label' });
+    return;
+  }
+
+  const label = createLabel(body.name, body.color);
+  if (label === null) {
+    json(res, 409, { error: 'duplicate_label' });
+    return;
+  }
+
+  json(res, 201, label);
+};
+
+const listLabelsRoute = (_req: IncomingMessage, res: ServerResponse): void => {
+  json(res, 200, listLabels());
+};
+
+const deleteLabelRoute = (params: RouteParams, res: ServerResponse): void => {
+  const id = parseId(params['id'] ?? '');
+  if (id === null) {
+    json(res, 400, { error: 'invalid_id' });
+    return;
+  }
+
+  if (!deleteLabel(id)) {
+    json(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  noContent(res);
+};
+
 const routes: Record<string, Handler> = {
   'GET /health': (_req, res) => json(res, 200, { status: 'ok' }),
   'GET /version': (_req, res) => json(res, 200, { version }),
@@ -478,6 +559,11 @@ const routes: Record<string, Handler> = {
     void patchTodo(req, res, params);
   },
   'GET /stats': (req, res) => getStats(req, res),
+  'POST /labels': (req, res) => {
+    void createLabelRoute(req, res);
+  },
+  'GET /labels': (req, res) => listLabelsRoute(req, res),
+  'DELETE /labels/:id': (_req, res, params) => deleteLabelRoute(params, res),
   'POST /todos': (req, res) => {
     void createTodo(req, res);
   },
