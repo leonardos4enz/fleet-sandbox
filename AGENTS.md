@@ -11,6 +11,11 @@ Este archivo lo leen todos los agentes antes de trabajar. Cada vez que corrijas 
 2. Todo comportamiento nuevo tiene un test que fallaría sin el cambio.
 3. El diff solo toca lo que pide el issue.
 
+## Tests aislados
+- Cada test prepara su propio estado. Nunca depende del orden de ejecución ni de lo que creó otro test o `describe`.
+- Todo estado en memoria de un módulo (arreglos, contadores) expone una función `reset…()` exportada solo para tests, y el archivo de test la llama en `beforeEach`.
+- Nada de aserciones con valores absolutos que solo son ciertas por lo que dejaron tests anteriores.
+
 ## Camino pavimentado: una sola forma de hacer cada cosa
 - **Rutas nuevas:** se agregan al objeto `routes` en `src/app.ts`, con su test en `src/app.test.ts`.
 - **Respuestas:** siempre con el helper `json()`.
