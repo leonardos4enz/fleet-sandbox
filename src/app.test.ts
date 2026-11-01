@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { addTodo, app } from './app.js';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { addTodo, app, resetTodos } from './app.js';
 
 let server: Server;
 let base: string;
@@ -14,12 +14,23 @@ beforeAll(async () => {
 
 afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
+// Cada test parte de un estado limpio: nada depende del orden ni de otros tests.
+beforeEach(() => {
+  resetTodos();
+});
+
 const postTodo = (body: string): Promise<Response> =>
   fetch(`${base}/todos`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body,
   });
+
+const getTodos = async (): Promise<Array<{ id: number; title: string; done: boolean }>> => {
+  const res = await fetch(`${base}/todos`);
+  expect(res.status).toBe(200);
+  return (await res.json()) as Array<{ id: number; title: string; done: boolean }>;
+};
 
 describe('app', () => {
   it('GET /health responde ok', async () => {
@@ -31,6 +42,22 @@ describe('app', () => {
   it('rutas desconocidas devuelven 404', async () => {
     const res = await fetch(`${base}/nope`);
     expect(res.status).toBe(404);
+  });
+});
+
+describe('resetTodos', () => {
+  it('vacía las tareas y reinicia el contador de ids', async () => {
+    addTodo('Primera');
+    addTodo('Segunda');
+
+    resetTodos();
+
+    expect(await getTodos()).toEqual([]);
+
+    const res = await postTodo(JSON.stringify({ title: 'Después del reset' }));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { id: number };
+    expect(body.id).toBe(1);
   });
 });
 
@@ -59,9 +86,10 @@ describe('todos', () => {
   });
 
   it('GET /todos devuelve las tareas creadas', async () => {
-    const res = await fetch(`${base}/todos`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<{ id: number; title: string; done: boolean }>;
+    await postTodo(JSON.stringify({ title: 'Comprar pan' }));
+
+    const body = await getTodos();
+
     expect(body).toHaveLength(1);
     expect(body[0]).toMatchObject({ title: 'Comprar pan', done: false });
   });
@@ -91,20 +119,24 @@ describe('todos', () => {
   });
 
   it('las peticiones inválidas no crean tareas', async () => {
-    const res = await fetch(`${base}/todos`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Array<{ title: string }>;
+    await postTodo(JSON.stringify({ title: 'Comprar pan' }));
+    await postTodo(JSON.stringify({ title: '' }));
+    await postTodo(JSON.stringify({}));
+    await postTodo('{no es json');
+    await postTodo(JSON.stringify({ title: 42 }));
+
+    const body = await getTodos();
+
     expect(body).toHaveLength(1);
     expect(body[0]?.title).toBe('Comprar pan');
   });
 });
 
 describe('filtrado de tareas por done', () => {
-  beforeAll(() => {
-    addTodo('Tarea completada', true);
-  });
-
   it('GET /todos?done=true devuelve solo las tareas con done=true', async () => {
+    addTodo('Tarea completada', true);
+    addTodo('Tarea pendiente', false);
+
     const res = await fetch(`${base}/todos?done=true`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{ title: string; done: boolean }>;
@@ -113,21 +145,27 @@ describe('filtrado de tareas por done', () => {
   });
 
   it('GET /todos?done=false devuelve solo las tareas con done=false', async () => {
+    addTodo('Tarea completada', true);
+    addTodo('Tarea pendiente', false);
+
     const res = await fetch(`${base}/todos?done=false`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{ title: string; done: boolean }>;
     expect(body.length).toBeGreaterThan(0);
     expect(body.every((todo) => todo.done === false)).toBe(true);
-    expect(body.map((todo) => todo.title)).toContain('Comprar pan');
+    expect(body.map((todo) => todo.title)).toContain('Tarea pendiente');
     expect(body.map((todo) => todo.title)).not.toContain('Tarea completada');
   });
 
   it('GET /todos sin parámetro sigue devolviendo todas las tareas', async () => {
+    addTodo('Tarea completada', true);
+    addTodo('Tarea pendiente', false);
+
     const res = await fetch(`${base}/todos`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as Array<{ title: string; done: boolean }>;
     const titles = body.map((todo) => todo.title);
-    expect(titles).toContain('Comprar pan');
+    expect(titles).toContain('Tarea pendiente');
     expect(titles).toContain('Tarea completada');
   });
 
@@ -139,21 +177,22 @@ describe('filtrado de tareas por done', () => {
 });
 
 describe('stats con tareas', () => {
-  beforeAll(async () => {
+  it('GET /stats cuenta las tareas creadas con POST /todos', async () => {
     await postTodo(JSON.stringify({ title: 'Tarea pendiente A' }));
     await postTodo(JSON.stringify({ title: 'Tarea pendiente B' }));
-  });
+    addTodo('Tarea completada', true);
 
-  it('GET /stats cuenta las tareas creadas con POST /todos', async () => {
     const res = await fetch(`${base}/stats`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ total: 4, done: 1, pending: 3 });
+    expect(await res.json()).toEqual({ total: 3, done: 1, pending: 2 });
   });
 
   it('GET /stats coincide con el total de tareas listadas en GET /todos', async () => {
-    const res = await fetch(`${base}/todos`);
-    expect(res.status).toBe(200);
-    const todos = (await res.json()) as Array<{ done: boolean }>;
+    await postTodo(JSON.stringify({ title: 'Tarea pendiente A' }));
+    await postTodo(JSON.stringify({ title: 'Tarea pendiente B' }));
+    addTodo('Tarea completada', true);
+
+    const todos = await getTodos();
     const statsRes = await fetch(`${base}/stats`);
     const stats = (await statsRes.json()) as { total: number; done: number; pending: number };
     expect(stats.total).toBe(todos.length);
