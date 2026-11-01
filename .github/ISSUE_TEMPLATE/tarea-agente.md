@@ -1,7 +1,6 @@
 ---
 name: Tarea para agente
-about: Tarea chica e independiente para la flota de agentes
-labels: agent:ready
+about: Tarea chica e independiente para la flota de agentes (luego agrega a mano la etiqueta agent:ready)
 ---
 
 ## Qué hay que hacer
