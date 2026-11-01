@@ -178,6 +178,16 @@ const parseQuery = (url: URL): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
+// Devuelve undefined si no viene el parámetro `label` o viene vacío (solo
+// espacios), y el nombre de la etiqueta a filtrar en cualquier otro caso.
+// El nombre se compara de forma exacta: distingue mayúsculas y minúsculas.
+const parseLabel = (url: URL): string | undefined => {
+  const raw = url.searchParams.get('label');
+  if (raw === null) return undefined;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
 // Máximo de tareas que se pueden pedir con `limit`.
 const MAX_LIMIT = 100;
 
@@ -222,6 +232,7 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
   const done = parseDone(url);
   const q = parseQuery(url);
   const priority = parsePriority(url);
+  const label = parseLabel(url);
 
   if (done === 'invalid') {
     json(res, 400, { error: 'invalid_done' });
@@ -249,6 +260,11 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
   }
   if (q !== undefined) {
     result = result.filter((todo) => todo.title.toLowerCase().includes(q));
+  }
+  if (label !== undefined) {
+    result = result.filter((todo) =>
+      labelsForTodo(todo.id).some((todoLabel) => todoLabel.name === label),
+    );
   }
 
   const { limit, offset } = pagination;
