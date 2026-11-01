@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run",
+    "test": "vitest run --sequence.shuffle",
     "verify": "npm run typecheck && npm run lint && npm run test"
   },
   "devDependencies": {
