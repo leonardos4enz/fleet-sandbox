@@ -639,6 +639,77 @@ describe('GET /todos/:id', () => {
   });
 });
 
+describe('DELETE /todos/:id', () => {
+  it('borra la tarea y responde 204 sin cuerpo', async () => {
+    const target = addTodo('Se borra');
+
+    const res = await fetch(`${base}/todos/${target.id}`, { method: 'DELETE' });
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe('');
+  });
+
+  it('después de borrar, GET /todos/:id responde 404 not_found', async () => {
+    const target = addTodo('Se borra');
+
+    await fetch(`${base}/todos/${target.id}`, { method: 'DELETE' });
+
+    const res = await fetch(`${base}/todos/${target.id}`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('después de borrar, la tarea no aparece en GET /todos', async () => {
+    const kept = addTodo('Se queda');
+    const removed = addTodo('Se borra');
+
+    await fetch(`${base}/todos/${removed.id}`, { method: 'DELETE' });
+
+    const body = await getTodos();
+    expect(body.map((todo) => todo.title)).toEqual(['Se queda']);
+    expect(body[0]?.id).toBe(kept.id);
+  });
+
+  it('responde 404 not_found si no existe la tarea', async () => {
+    addTodo('Primera');
+
+    const res = await fetch(`${base}/todos/999`, { method: 'DELETE' });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('responde 400 invalid_id si el id no es un entero positivo', async () => {
+    const res = await fetch(`${base}/todos/abc`, { method: 'DELETE' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_id' });
+  });
+
+  it('responde 400 invalid_id con id cero, negativo o decimal', async () => {
+    for (const id of ['0', '-1', '1.5']) {
+      const res = await fetch(`${base}/todos/${id}`, { method: 'DELETE' });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'invalid_id' });
+    }
+  });
+
+  it('un id inválido no borra ninguna tarea', async () => {
+    addTodo('Se queda');
+
+    await fetch(`${base}/todos/abc`, { method: 'DELETE' });
+
+    expect(await getTodos()).toHaveLength(1);
+  });
+
+  it('DELETE /todos sigue borrando todas las tareas', async () => {
+    addTodo('Primera');
+    addTodo('Segunda');
+
+    const res = await fetch(`${base}/todos`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ deleted: 2 });
+    expect(await getTodos()).toEqual([]);
+  });
+});
+
 describe('stats con tareas', () => {
   it('GET /stats cuenta las tareas creadas con POST /todos', async () => {
     await postTodo(JSON.stringify({ title: 'Tarea pendiente A' }));

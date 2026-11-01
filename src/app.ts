@@ -37,6 +37,12 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
   res.end(JSON.stringify(body));
 };
 
+// Un 204 no admite cuerpo: solo se envía el status.
+const noContent = (res: ServerResponse): void => {
+  res.writeHead(204);
+  res.end();
+};
+
 const todos: Todo[] = [];
 let nextTodoId = 1;
 
@@ -278,6 +284,23 @@ const getTodoById = (params: RouteParams, res: ServerResponse): void => {
   json(res, 200, todo);
 };
 
+const deleteTodoById = (params: RouteParams, res: ServerResponse): void => {
+  const id = parseTodoId(params['id'] ?? '');
+  if (id === null) {
+    json(res, 400, { error: 'invalid_id' });
+    return;
+  }
+
+  const index = todos.findIndex((candidate) => candidate.id === id);
+  if (index === -1) {
+    json(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  todos.splice(index, 1);
+  noContent(res);
+};
+
 const routes: Record<string, Handler> = {
   'GET /health': (_req, res) => json(res, 200, { status: 'ok' }),
   'GET /version': (_req, res) => json(res, 200, { version }),
@@ -289,6 +312,7 @@ const routes: Record<string, Handler> = {
     void createTodo(req, res);
   },
   'DELETE /todos': (req, res) => deleteAllTodos(req, res),
+  'DELETE /todos/:id': (_req, res, params) => deleteTodoById(params, res),
 };
 
 // Un segmento de ruta que empieza por `:` captura el valor de ese parámetro.
