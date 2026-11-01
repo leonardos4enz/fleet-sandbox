@@ -489,6 +489,177 @@ describe('búsqueda de tareas por texto', () => {
   });
 });
 
+describe('filtrado de tareas por etiqueta', () => {
+  // Crea una etiqueta y falla el test si no se pudo crear, para no tener que
+  // comprobar el null en cada uso.
+  const makeLabel = (name: string, color: string): Label => {
+    const label = createLabel(name, color);
+    if (label === null) throw new Error(`no se pudo crear la etiqueta ${name}`);
+    return label;
+  };
+
+  it('GET /todos?label=trabajo devuelve solo las tareas con esa etiqueta', async () => {
+    const conEtiqueta = addTodo('Hacer informe');
+    const sinEtiqueta = addTodo('Comprar pan');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(conEtiqueta.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=trabajo`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ id: number; title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Hacer informe']);
+    expect(body[0]?.id).toBe(conEtiqueta.id);
+    expect(body.map((todo) => todo.id)).not.toContain(sinEtiqueta.id);
+  });
+
+  it('la tarea filtrada viene con su etiqueta', async () => {
+    addTodo('Comprar pan');
+    const todo = addTodo('Hacer informe');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(todo.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=trabajo`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; labels: Label[] }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Hacer informe']);
+    expect(body[0]?.labels).toEqual([{ id: trabajo.id, name: 'trabajo', color: '#ff0000' }]);
+  });
+
+  it('GET /todos?label=inexistente responde 200 con un arreglo vacío', async () => {
+    const todo = addTodo('Hacer informe');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(todo.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=inexistente`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it('GET /todos sin label sigue devolviendo todas las tareas', async () => {
+    const conEtiqueta = addTodo('Hacer informe');
+    addTodo('Comprar pan');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(conEtiqueta.id, trabajo.id);
+
+    const body = await getTodos();
+
+    expect(body.map((todo) => todo.title)).toEqual(['Hacer informe', 'Comprar pan']);
+  });
+
+  it('GET /todos?label= vacío se comporta como si no viniera', async () => {
+    const conEtiqueta = addTodo('Hacer informe');
+    addTodo('Comprar pan');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(conEtiqueta.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Hacer informe', 'Comprar pan']);
+  });
+
+  it('GET /todos?label= con solo espacios se comporta como si no viniera', async () => {
+    const conEtiqueta = addTodo('Hacer informe');
+    addTodo('Comprar pan');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(conEtiqueta.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=%20%20`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Hacer informe', 'Comprar pan']);
+  });
+
+  it('GET /todos?label=trabajo&done=false devuelve solo las pendientes con esa etiqueta', async () => {
+    const pendiente = addTodo('Hacer informe', false);
+    const completada = addTodo('Enviar informe', true);
+    addTodo('Comprar pan', false);
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(pendiente.id, trabajo.id);
+    assignLabelToTodo(completada.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=trabajo&done=false`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; done: boolean }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Hacer informe']);
+    expect(body[0]?.done).toBe(false);
+  });
+
+  it('GET /todos?label=trabajo&priority=high devuelve solo las de esa prioridad', async () => {
+    const urgente = addTodo('Hacer informe', false, 'high');
+    const normal = addTodo('Revisar informe', false, 'medium');
+    addTodo('Tarea urgente sin etiqueta', false, 'high');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(urgente.id, trabajo.id);
+    assignLabelToTodo(normal.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=trabajo&priority=high`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; priority: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Hacer informe']);
+    expect(body[0]?.priority).toBe('high');
+  });
+
+  it('GET /todos?label=trabajo&q=pan devuelve solo las de esa etiqueta con ese texto', async () => {
+    const conPan = addTodo('Comprar pan para la oficina');
+    const sinPan = addTodo('Hacer informe');
+    addTodo('Comprar pan');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(conPan.id, trabajo.id);
+    assignLabelToTodo(sinPan.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=trabajo&q=pan`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Comprar pan para la oficina']);
+  });
+
+  it('GET /todos?label=trabajo&limit=1&offset=1 devuelve la segunda coincidencia', async () => {
+    addTodo('Tarea sin etiqueta');
+    const primera = addTodo('Hacer informe');
+    const segunda = addTodo('Enviar informe');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(primera.id, trabajo.id);
+    assignLabelToTodo(segunda.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=trabajo&limit=1&offset=1`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Enviar informe']);
+  });
+
+  it('una tarea con dos etiquetas aparece en el resultado de cada filtro', async () => {
+    addTodo('Tarea sin etiqueta');
+    const todo = addTodo('Hacer informe');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    const casa = makeLabel('casa', '#00ff00');
+    assignLabelToTodo(todo.id, trabajo.id);
+    assignLabelToTodo(todo.id, casa.id);
+
+    const porTrabajo = await fetch(`${base}/todos?label=trabajo`);
+    expect(porTrabajo.status).toBe(200);
+    expect(((await porTrabajo.json()) as Array<{ title: string }>).map((todo) => todo.title)).toEqual([
+      'Hacer informe',
+    ]);
+
+    const porCasa = await fetch(`${base}/todos?label=casa`);
+    expect(porCasa.status).toBe(200);
+    expect(((await porCasa.json()) as Array<{ title: string }>).map((todo) => todo.title)).toEqual([
+      'Hacer informe',
+    ]);
+  });
+
+  it('el nombre de la etiqueta se compara exactamente', async () => {
+    const todo = addTodo('Hacer informe');
+    const trabajo = makeLabel('trabajo', '#ff0000');
+    assignLabelToTodo(todo.id, trabajo.id);
+
+    const res = await fetch(`${base}/todos?label=Trabajo`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+});
+
 describe('DELETE /todos', () => {
   it('borra todas las tareas y responde 200 con la cantidad borrada', async () => {
     addTodo('Primera');
