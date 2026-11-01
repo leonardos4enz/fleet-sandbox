@@ -113,6 +113,12 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
   json(res, 200, todos.filter((todo) => todo.done === done));
 };
 
+const deleteAllTodos = (_req: IncomingMessage, res: ServerResponse): void => {
+  const deleted = todos.length;
+  todos.length = 0;
+  json(res, 200, { deleted });
+};
+
 const getStats = (_req: IncomingMessage, res: ServerResponse): void => {
   const total = todos.length;
   const done = todos.filter((todo) => todo.done).length;
@@ -140,6 +146,7 @@ const routes: Record<string, Handler> = {
   'POST /todos': (req, res) => {
     void createTodo(req, res);
   },
+  'DELETE /todos': (req, res) => deleteAllTodos(req, res),
 };
 
 export const app: Handler = (req, res) => {
