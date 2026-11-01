@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { addTodo, app, resetTodos } from './app.js';
+import { assignLabelToTodo, createLabel, resetLabels, type Label } from './labels.js';
 
 // La versión esperada se lee del package.json real, no se escribe a mano,
 // para que el test siga siendo cierto cuando se suba la versión.
@@ -24,6 +25,7 @@ afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
 // Cada test parte de un estado limpio: nada depende del orden ni de otros tests.
 beforeEach(() => {
   resetTodos();
+  resetLabels();
 });
 
 const postTodo = (body: string): Promise<Response> =>
@@ -34,7 +36,7 @@ const postTodo = (body: string): Promise<Response> =>
   });
 
 const getTodos = async (): Promise<
-  Array<{ id: number; title: string; done: boolean; priority: string }>
+  Array<{ id: number; title: string; done: boolean; priority: string; labels: unknown[] }>
 > => {
   const res = await fetch(`${base}/todos`);
   expect(res.status).toBe(200);
@@ -43,6 +45,7 @@ const getTodos = async (): Promise<
     title: string;
     done: boolean;
     priority: string;
+    labels: unknown[];
   }>;
 };
 
@@ -564,7 +567,7 @@ describe('GET /todos/:id', () => {
 
     const res = await fetch(`${base}/todos/${second.id}`);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual(second);
+    expect(await res.json()).toEqual({ ...second, labels: [] });
     expect(second.id).not.toBe(first.id);
   });
 
@@ -658,6 +661,7 @@ describe('PATCH /todos/:id', () => {
       title: 'Título nuevo',
       done: false,
       priority: 'medium',
+      labels: [],
     });
   });
 
@@ -672,6 +676,7 @@ describe('PATCH /todos/:id', () => {
       title: 'Tarea',
       done: true,
       priority: 'medium',
+      labels: [],
     });
   });
 
@@ -686,6 +691,7 @@ describe('PATCH /todos/:id', () => {
       title: 'Título nuevo',
       done: true,
       priority: 'medium',
+      labels: [],
     });
   });
 
@@ -701,6 +707,7 @@ describe('PATCH /todos/:id', () => {
       title: 'Título nuevo',
       done: true,
       priority: 'medium',
+      labels: [],
     });
   });
 
@@ -715,6 +722,7 @@ describe('PATCH /todos/:id', () => {
       title: 'Tarea',
       done: true,
       priority: 'medium',
+      labels: [],
     });
   });
 
@@ -729,6 +737,7 @@ describe('PATCH /todos/:id', () => {
       title: 'Título nuevo',
       done: false,
       priority: 'high',
+      labels: [],
     });
   });
 
@@ -743,6 +752,7 @@ describe('PATCH /todos/:id', () => {
       title: 'Título nuevo',
       done: false,
       priority: 'low',
+      labels: [],
     });
   });
 
@@ -812,6 +822,7 @@ describe('PATCH /todos/:id', () => {
       title: 'Tarea',
       done: false,
       priority: 'medium',
+      labels: [],
     });
   });
 
@@ -945,5 +956,112 @@ describe('stats con tareas', () => {
     expect(stats.total).toBe(todos.length);
     expect(stats.done).toBe(todos.filter((todo) => todo.done).length);
     expect(stats.pending).toBe(todos.filter((todo) => !todo.done).length);
+  });
+});
+
+describe('etiquetas de las tareas', () => {
+  // Crea una etiqueta y falla el test si no se pudo crear, para no tener que
+  // comprobar el null en cada uso.
+  const makeLabel = (name: string, color: string): Label => {
+    const label = createLabel(name, color);
+    if (label === null) throw new Error(`no se pudo crear la etiqueta ${name}`);
+    return label;
+  };
+
+  it('POST /todos responde 201 con labels vacío', async () => {
+    const res = await postTodo(JSON.stringify({ title: 'Comprar pan' }));
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({
+      id: 1,
+      title: 'Comprar pan',
+      done: false,
+      priority: 'medium',
+      labels: [],
+    });
+  });
+
+  it('GET /todos devuelve las etiquetas de cada tarea', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+    assignLabelToTodo(todo.id, label.id);
+
+    const body = await getTodos();
+
+    expect(body).toHaveLength(1);
+    expect(body[0]?.labels).toEqual([{ id: label.id, name: 'urgente', color: '#ff0000' }]);
+  });
+
+  it('GET /todos/:id devuelve las etiquetas de la tarea', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+    assignLabelToTodo(todo.id, label.id);
+
+    const res = await fetch(`${base}/todos/${todo.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { labels: Label[] };
+    expect(body.labels).toEqual([{ id: label.id, name: 'urgente', color: '#ff0000' }]);
+  });
+
+  it('GET /todos/latest devuelve las etiquetas de la última tarea', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+    assignLabelToTodo(todo.id, label.id);
+
+    const res = await fetch(`${base}/todos/latest`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: number; labels: Label[] };
+    expect(body.id).toBe(todo.id);
+    expect(body.labels).toEqual([{ id: label.id, name: 'urgente', color: '#ff0000' }]);
+  });
+
+  it('PATCH /todos/:id devuelve las etiquetas de la tarea', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+    assignLabelToTodo(todo.id, label.id);
+
+    const res = await fetch(`${base}/todos/${todo.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Comprar pan y leche' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string; labels: Label[] };
+    expect(body.title).toBe('Comprar pan y leche');
+    expect(body.labels).toEqual([{ id: label.id, name: 'urgente', color: '#ff0000' }]);
+  });
+
+  it('un PATCH no borra las etiquetas de la tarea', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+    assignLabelToTodo(todo.id, label.id);
+
+    await fetch(`${base}/todos/${todo.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ done: true }),
+    });
+
+    const res = await fetch(`${base}/todos/${todo.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { done: boolean; labels: Label[] };
+    expect(body.done).toBe(true);
+    expect(body.labels).toEqual([{ id: label.id, name: 'urgente', color: '#ff0000' }]);
+  });
+
+  it('devuelve varias etiquetas en el orden en que se crearon', async () => {
+    const todo = addTodo('Comprar pan');
+    const primera = makeLabel('urgente', '#ff0000');
+    const segunda = makeLabel('casa', '#00ff00');
+    assignLabelToTodo(todo.id, primera.id);
+    assignLabelToTodo(todo.id, segunda.id);
+
+    const res = await fetch(`${base}/todos/${todo.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { labels: Label[] };
+    expect(body.labels).toEqual([
+      { id: primera.id, name: 'urgente', color: '#ff0000' },
+      { id: segunda.id, name: 'casa', color: '#00ff00' },
+    ]);
   });
 });
