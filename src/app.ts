@@ -6,11 +6,23 @@ export type RouteParams = Record<string, string>;
 
 export type Handler = (req: IncomingMessage, res: ServerResponse, params: RouteParams) => void;
 
+// Prioridades válidas, de menor a mayor.
+const PRIORITIES = ['low', 'medium', 'high'] as const;
+
+export type Priority = (typeof PRIORITIES)[number];
+
+const DEFAULT_PRIORITY: Priority = 'medium';
+
 export type Todo = {
   id: number;
   title: string;
   done: boolean;
+  priority: Priority;
 };
+
+// Indica si el valor es una de las prioridades válidas.
+const isPriority = (value: unknown): value is Priority =>
+  typeof value === 'string' && (PRIORITIES as readonly string[]).includes(value);
 
 // La versión viene del package.json real: `<raíz>/package.json`, que es un
 // nivel por encima tanto de `src/` (código fuente) como de `dist/` (build).
@@ -34,8 +46,12 @@ const noContent = (res: ServerResponse): void => {
 const todos: Todo[] = [];
 let nextTodoId = 1;
 
-export const addTodo = (title: string, done = false): Todo => {
-  const todo: Todo = { id: nextTodoId, title, done };
+export const addTodo = (
+  title: string,
+  done = false,
+  priority: Priority = DEFAULT_PRIORITY,
+): Todo => {
+  const todo: Todo = { id: nextTodoId, title, done, priority };
   nextTodoId += 1;
   todos.push(todo);
   return todo;
@@ -57,42 +73,61 @@ const readBody = async (req: IncomingMessage): Promise<string> => {
   return body;
 };
 
+// Title y priority leídos del body. El title es null si no es válido.
+// La priority es la prioridad pedida, la de por defecto si no viene, o
+// 'invalid' si viene con un valor que no es una prioridad válida.
+type ParsedBody = {
+  title: string | null;
+  priority: Priority | 'invalid';
+};
+
 // Devuelve el title si el body es un JSON válido con un title no vacío,
 // o null en cualquier otro caso (body inválido, ausente, vacío o no string).
-const parseTitle = async (req: IncomingMessage): Promise<string | null> => {
+// La priority es opcional: si no viene, se usa la de por defecto.
+const parseBody = async (req: IncomingMessage): Promise<ParsedBody> => {
   let raw: string;
   try {
     raw = await readBody(req);
   } catch {
-    return null;
+    return { title: null, priority: DEFAULT_PRIORITY };
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return null;
+    return { title: null, priority: DEFAULT_PRIORITY };
   }
 
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return null;
+    return { title: null, priority: DEFAULT_PRIORITY };
   }
 
-  const { title } = parsed as Record<string, unknown>;
-  if (typeof title !== 'string') return null;
+  const { title, priority } = parsed as Record<string, unknown>;
+
+  let parsedPriority: Priority | 'invalid' = DEFAULT_PRIORITY;
+  if (priority !== undefined) {
+    parsedPriority = isPriority(priority) ? priority : 'invalid';
+  }
+
+  if (typeof title !== 'string') return { title: null, priority: parsedPriority };
 
   const trimmed = title.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return { title: trimmed.length > 0 ? trimmed : null, priority: parsedPriority };
 };
 
 const createTodo = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
-  const title = await parseTitle(req);
+  const { title, priority } = await parseBody(req);
   if (title === null) {
     json(res, 400, { error: 'invalid_title' });
     return;
   }
+  if (priority === 'invalid') {
+    json(res, 400, { error: 'invalid_priority' });
+    return;
+  }
 
-  const todo = addTodo(title);
+  const todo = addTodo(title, false, priority);
   json(res, 201, todo);
 };
 
@@ -103,6 +138,14 @@ const parseDone = (url: URL): boolean | 'invalid' | undefined => {
   if (raw === null) return undefined;
   if (raw !== 'true' && raw !== 'false') return 'invalid';
   return raw === 'true';
+};
+
+// Devuelve undefined si no viene el parámetro `priority`, la prioridad a
+// filtrar si vale "low", "medium" o "high", y 'invalid' en cualquier otro caso.
+const parsePriority = (url: URL): Priority | 'invalid' | undefined => {
+  const raw = url.searchParams.get('priority');
+  if (raw === null) return undefined;
+  return isPriority(raw) ? raw : 'invalid';
 };
 
 // Devuelve undefined si no viene el parámetro `q` o viene vacío (solo
@@ -157,9 +200,15 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const done = parseDone(url);
   const q = parseQuery(url);
+  const priority = parsePriority(url);
 
   if (done === 'invalid') {
     json(res, 400, { error: 'invalid_done' });
+    return;
+  }
+
+  if (priority === 'invalid') {
+    json(res, 400, { error: 'invalid_priority' });
     return;
   }
 
@@ -173,6 +222,9 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
   let result = todos;
   if (done !== undefined) {
     result = result.filter((todo) => todo.done === done);
+  }
+  if (priority !== undefined) {
+    result = result.filter((todo) => todo.priority === priority);
   }
   if (q !== undefined) {
     result = result.filter((todo) => todo.title.toLowerCase().includes(q));
