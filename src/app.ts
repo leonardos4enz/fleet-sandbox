@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export type Handler = (req: IncomingMessage, res: ServerResponse) => void;
@@ -7,6 +8,14 @@ export type Todo = {
   title: string;
   done: boolean;
 };
+
+// La versión viene del package.json real: `<raíz>/package.json`, que es un
+// nivel por encima tanto de `src/` (código fuente) como de `dist/` (build).
+const packageJson = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string };
+
+const version: string = packageJson.version;
 
 const json = (res: ServerResponse, status: number, body: unknown): void => {
   res.writeHead(status, { 'content-type': 'application/json' });
@@ -112,6 +121,7 @@ const getStats = (_req: IncomingMessage, res: ServerResponse): void => {
 
 const routes: Record<string, Handler> = {
   'GET /health': (_req, res) => json(res, 200, { status: 'ok' }),
+  'GET /version': (_req, res) => json(res, 200, { version }),
   'GET /todos': (req, res) => listTodos(req, res),
   'GET /stats': (req, res) => getStats(req, res),
   'POST /todos': (req, res) => {

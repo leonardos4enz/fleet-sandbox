@@ -1,7 +1,14 @@
+import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { addTodo, app, resetTodos } from './app.js';
+
+// La versión esperada se lee del package.json real, no se escribe a mano,
+// para que el test siga siendo cierto cuando se suba la versión.
+const packageJson = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string };
 
 let server: Server;
 let base: string;
@@ -42,6 +49,14 @@ describe('app', () => {
   it('rutas desconocidas devuelven 404', async () => {
     const res = await fetch(`${base}/nope`);
     expect(res.status).toBe(404);
+  });
+});
+
+describe('version', () => {
+  it('GET /version devuelve la versión de package.json', async () => {
+    const res = await fetch(`${base}/version`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ version: packageJson.version });
   });
 });
 
