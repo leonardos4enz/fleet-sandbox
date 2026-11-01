@@ -23,6 +23,13 @@ export const addTodo = (title: string, done = false): Todo => {
   return todo;
 };
 
+// Vacía el estado en memoria y reinicia la numeración de ids.
+// Solo para tests: cada test debe partir de un estado limpio.
+export const resetTodos = (): void => {
+  todos.length = 0;
+  nextTodoId = 1;
+};
+
 const readBody = async (req: IncomingMessage): Promise<string> => {
   req.setEncoding('utf8');
   let body = '';
