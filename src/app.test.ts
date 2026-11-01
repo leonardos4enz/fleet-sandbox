@@ -176,6 +176,37 @@ describe('filtrado de tareas por done', () => {
   });
 });
 
+describe('última tarea', () => {
+  it('GET /todos/latest responde 404 no_todos cuando no hay tareas', async () => {
+    const res = await fetch(`${base}/todos/latest`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'no_todos' });
+  });
+
+  it('GET /todos/latest devuelve la tarea creada más recientemente', async () => {
+    await postTodo(JSON.stringify({ title: 'Primera' }));
+    await postTodo(JSON.stringify({ title: 'Segunda' }));
+    await postTodo(JSON.stringify({ title: 'Tercera' }));
+
+    const res = await fetch(`${base}/todos/latest`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: number; title: string; done: boolean };
+    expect(body.title).toBe('Tercera');
+    expect(body.done).toBe(false);
+
+    const todos = await getTodos();
+    expect(body.id).toBe(todos[todos.length - 1]?.id);
+  });
+
+  it('GET /todos/latest devuelve la única tarea cuando solo hay una', async () => {
+    await postTodo(JSON.stringify({ title: 'Única' }));
+
+    const res = await fetch(`${base}/todos/latest`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ title: 'Única', done: false });
+  });
+});
+
 describe('stats con tareas', () => {
   it('GET /stats cuenta las tareas creadas con POST /todos', async () => {
     await postTodo(JSON.stringify({ title: 'Tarea pendiente A' }));
