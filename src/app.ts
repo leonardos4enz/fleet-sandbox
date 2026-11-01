@@ -284,6 +284,86 @@ const getTodoById = (params: RouteParams, res: ServerResponse): void => {
   json(res, 200, todo);
 };
 
+// Campos que se pueden cambiar con PATCH /todos/:id. Los ausentes no se tocan.
+type TodoPatch = {
+  title?: string;
+  done?: boolean;
+};
+
+// Devuelve los campos a cambiar si el body es un JSON válido con al menos un
+// campo editable válido (`title` string no vacío o `done` booleano), o null en
+// cualquier otro caso (body inválido, ausente, vacío, sin campos editables o
+// con un `title`/`done` de tipo incorrecto). Los campos desconocidos se ignoran.
+const parsePatch = async (req: IncomingMessage): Promise<TodoPatch | null> => {
+  let raw: string;
+  try {
+    raw = await readBody(req);
+  } catch {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+
+  const body = parsed as Record<string, unknown>;
+  const patch: TodoPatch = {};
+
+  if ('title' in body) {
+    const title = body['title'];
+    if (typeof title !== 'string') return null;
+    const trimmed = title.trim();
+    if (trimmed.length === 0) return null;
+    patch.title = trimmed;
+  }
+
+  if ('done' in body) {
+    const done = body['done'];
+    if (typeof done !== 'boolean') return null;
+    patch.done = done;
+  }
+
+  if (patch.title === undefined && patch.done === undefined) return null;
+
+  return patch;
+};
+
+const patchTodo = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: RouteParams,
+): Promise<void> => {
+  const id = parseTodoId(params['id'] ?? '');
+  if (id === null) {
+    json(res, 400, { error: 'invalid_id' });
+    return;
+  }
+
+  const patch = await parsePatch(req);
+  if (patch === null) {
+    json(res, 400, { error: 'invalid_body' });
+    return;
+  }
+
+  const todo = todos.find((candidate) => candidate.id === id);
+  if (!todo) {
+    json(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  if (patch.title !== undefined) todo.title = patch.title;
+  if (patch.done !== undefined) todo.done = patch.done;
+
+  json(res, 200, todo);
+};
+
 const deleteTodoById = (params: RouteParams, res: ServerResponse): void => {
   const id = parseTodoId(params['id'] ?? '');
   if (id === null) {
@@ -307,6 +387,9 @@ const routes: Record<string, Handler> = {
   'GET /todos': (req, res) => listTodos(req, res),
   'GET /todos/latest': (_req, res) => getLatestTodo(_req, res),
   'GET /todos/:id': (_req, res, params) => getTodoById(params, res),
+  'PATCH /todos/:id': (req, res, params) => {
+    void patchTodo(req, res, params);
+  },
   'GET /stats': (req, res) => getStats(req, res),
   'POST /todos': (req, res) => {
     void createTodo(req, res);

@@ -639,6 +639,219 @@ describe('GET /todos/:id', () => {
   });
 });
 
+describe('PATCH /todos/:id', () => {
+  const patchTodo = (id: number | string, body: string): Promise<Response> =>
+    fetch(`${base}/todos/${id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+
+  it('actualiza el título y responde 200 con la tarea actualizada', async () => {
+    const todo = addTodo('Título viejo');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ title: 'Título nuevo' }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: todo.id,
+      title: 'Título nuevo',
+      done: false,
+      priority: 'medium',
+    });
+  });
+
+  it('actualiza el estado done y responde 200 con la tarea actualizada', async () => {
+    const todo = addTodo('Tarea');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ done: true }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: todo.id,
+      title: 'Tarea',
+      done: true,
+      priority: 'medium',
+    });
+  });
+
+  it('actualiza el título y el estado a la vez', async () => {
+    const todo = addTodo('Título viejo');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ title: 'Título nuevo', done: true }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: todo.id,
+      title: 'Título nuevo',
+      done: true,
+      priority: 'medium',
+    });
+  });
+
+  it('el cambio se ve después en GET /todos/:id', async () => {
+    const todo = addTodo('Título viejo');
+
+    await patchTodo(todo.id, JSON.stringify({ title: 'Título nuevo', done: true }));
+
+    const res = await fetch(`${base}/todos/${todo.id}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: todo.id,
+      title: 'Título nuevo',
+      done: true,
+      priority: 'medium',
+    });
+  });
+
+  it('ignora los campos desconocidos', async () => {
+    const todo = addTodo('Tarea');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ done: true, extra: 'ignorado' }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: todo.id,
+      title: 'Tarea',
+      done: true,
+      priority: 'medium',
+    });
+  });
+
+  it('mantiene la prioridad de la tarea al editarla', async () => {
+    const todo = addTodo('Tarea', false, 'high');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ title: 'Título nuevo' }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: todo.id,
+      title: 'Título nuevo',
+      done: false,
+      priority: 'high',
+    });
+  });
+
+  it('ignora la priority del body porque editar la prioridad está fuera de alcance', async () => {
+    const todo = addTodo('Tarea', false, 'low');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ title: 'Título nuevo', priority: 'high' }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: todo.id,
+      title: 'Título nuevo',
+      done: false,
+      priority: 'low',
+    });
+  });
+
+  it('con title vacío responde 400 invalid_body', async () => {
+    const todo = addTodo('Tarea');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ title: '' }));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_body' });
+  });
+
+  it('con title de tipo incorrecto responde 400 invalid_body', async () => {
+    const todo = addTodo('Tarea');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ title: 42 }));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_body' });
+  });
+
+  it('con done que no es booleano responde 400 invalid_body', async () => {
+    const todo = addTodo('Tarea');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ done: 'sí' }));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_body' });
+  });
+
+  it('sin ningún campo válido responde 400 invalid_body', async () => {
+    const todo = addTodo('Tarea');
+
+    const res = await patchTodo(todo.id, JSON.stringify({ desconocido: 1 }));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_body' });
+  });
+
+  it('con body vacío responde 400 invalid_body', async () => {
+    const todo = addTodo('Tarea');
+
+    const res = await patchTodo(todo.id, JSON.stringify({}));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_body' });
+  });
+
+  it('con body que no es JSON responde 400 invalid_body', async () => {
+    const todo = addTodo('Tarea');
+
+    const res = await patchTodo(todo.id, '{no es json');
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_body' });
+  });
+
+  it('un body inválido no modifica la tarea', async () => {
+    const todo = addTodo('Tarea');
+
+    await patchTodo(todo.id, JSON.stringify({ title: '' }));
+
+    const res = await fetch(`${base}/todos/${todo.id}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: todo.id,
+      title: 'Tarea',
+      done: false,
+      priority: 'medium',
+    });
+  });
+
+  it('responde 404 not_found si no existe la tarea', async () => {
+    addTodo('Primera');
+
+    const res = await patchTodo(999, JSON.stringify({ title: 'Título nuevo' }));
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('responde 400 invalid_id si el id no es un entero positivo', async () => {
+    const res = await patchTodo('abc', JSON.stringify({ title: 'Título nuevo' }));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_id' });
+  });
+
+  it('GET /stats refleja el cambio de done', async () => {
+    const todo = addTodo('Tarea pendiente');
+
+    await patchTodo(todo.id, JSON.stringify({ done: true }));
+
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ total: 1, done: 1, pending: 0 });
+  });
+
+  it('GET /stats refleja volver a dejar la tarea pendiente', async () => {
+    const todo = addTodo('Tarea completada', true);
+
+    await patchTodo(todo.id, JSON.stringify({ done: false }));
+
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ total: 1, done: 0, pending: 1 });
+  });
+});
+
 describe('DELETE /todos/:id', () => {
   it('borra la tarea y responde 204 sin cuerpo', async () => {
     const target = addTodo('Se borra');
