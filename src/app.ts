@@ -97,9 +97,16 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
   json(res, 200, todos.filter((todo) => todo.done === done));
 };
 
+const getStats = (_req: IncomingMessage, res: ServerResponse): void => {
+  const total = todos.length;
+  const done = todos.filter((todo) => todo.done).length;
+  json(res, 200, { total, done, pending: total - done });
+};
+
 const routes: Record<string, Handler> = {
   'GET /health': (_req, res) => json(res, 200, { status: 'ok' }),
   'GET /todos': (req, res) => listTodos(req, res),
+  'GET /stats': (req, res) => getStats(req, res),
   'POST /todos': (req, res) => {
     void createTodo(req, res);
   },
