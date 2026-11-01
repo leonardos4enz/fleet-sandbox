@@ -410,6 +410,88 @@ describe('última tarea', () => {
   });
 });
 
+describe('GET /todos/:id', () => {
+  it('devuelve la tarea con ese id', async () => {
+    const first = addTodo('Primera');
+    const second = addTodo('Segunda');
+
+    const res = await fetch(`${base}/todos/${second.id}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(second);
+    expect(second.id).not.toBe(first.id);
+  });
+
+  it('devuelve la tarea correcta entre varias', async () => {
+    addTodo('Primera');
+    const target = addTodo('Segunda');
+    addTodo('Tercera');
+
+    const res = await fetch(`${base}/todos/${target.id}`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: target.id, title: 'Segunda', done: false });
+  });
+
+  it('responde 404 not_found si no existe la tarea', async () => {
+    addTodo('Primera');
+
+    const res = await fetch(`${base}/todos/999`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('responde 400 invalid_id si el id no es un entero positivo', async () => {
+    const res = await fetch(`${base}/todos/abc`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_id' });
+  });
+
+  it('responde 400 invalid_id con id cero o negativo', async () => {
+    const zero = await fetch(`${base}/todos/0`);
+    expect(zero.status).toBe(400);
+    expect(await zero.json()).toEqual({ error: 'invalid_id' });
+
+    const negative = await fetch(`${base}/todos/-1`);
+    expect(negative.status).toBe(400);
+    expect(await negative.json()).toEqual({ error: 'invalid_id' });
+  });
+
+  it('responde 400 invalid_id con id decimal', async () => {
+    const res = await fetch(`${base}/todos/1.5`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_id' });
+  });
+
+  it('responde 400 invalid_id con id vacío', async () => {
+    const res = await fetch(`${base}/todos/`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_id' });
+  });
+
+  it('responde 400 invalid_id con id mal codificado', async () => {
+    const res = await fetch(`${base}/todos/%zz`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_id' });
+  });
+
+  it('GET /todos/latest sigue devolviendo la última tarea y no un 400', async () => {
+    await postTodo(JSON.stringify({ title: 'Primera' }));
+    await postTodo(JSON.stringify({ title: 'Segunda' }));
+
+    const res = await fetch(`${base}/todos/latest`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ title: 'Segunda', done: false });
+  });
+
+  it('las rutas exactas siguen funcionando', async () => {
+    addTodo('Primera');
+
+    expect((await fetch(`${base}/todos`)).status).toBe(200);
+    expect((await fetch(`${base}/stats`)).status).toBe(200);
+    expect((await fetch(`${base}/health`)).status).toBe(200);
+    expect((await fetch(`${base}/nope`)).status).toBe(404);
+  });
+});
+
 describe('stats con tareas', () => {
   it('GET /stats cuenta las tareas creadas con POST /todos', async () => {
     await postTodo(JSON.stringify({ title: 'Tarea pendiente A' }));
