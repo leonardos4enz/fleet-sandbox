@@ -941,6 +941,173 @@ describe('DELETE /todos/:id', () => {
   });
 });
 
+describe('etiquetas', () => {
+  const postLabel = (body: string): Promise<Response> =>
+    fetch(`${base}/labels`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+
+  const getLabels = async (): Promise<Label[]> => {
+    const res = await fetch(`${base}/labels`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as Label[];
+  };
+
+  it('POST /labels crea una etiqueta y responde 201', async () => {
+    const res = await postLabel(JSON.stringify({ name: 'trabajo', color: '#a1b2c3' }));
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ id: 1, name: 'trabajo', color: '#a1b2c3' });
+  });
+
+  it('los ids de las etiquetas son correlativos y empiezan en 1', async () => {
+    await postLabel(JSON.stringify({ name: 'trabajo', color: '#a1b2c3' }));
+    const res = await postLabel(JSON.stringify({ name: 'casa', color: '#d4e5f6' }));
+
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ id: 2, name: 'casa', color: '#d4e5f6' });
+  });
+
+  it('POST /labels con un name ya usado responde 409 duplicate_label', async () => {
+    await postLabel(JSON.stringify({ name: 'trabajo', color: '#a1b2c3' }));
+
+    const res = await postLabel(JSON.stringify({ name: 'trabajo', color: '#d4e5f6' }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'duplicate_label' });
+  });
+
+  it('una etiqueta duplicada no se crea', async () => {
+    await postLabel(JSON.stringify({ name: 'trabajo', color: '#a1b2c3' }));
+    await postLabel(JSON.stringify({ name: 'trabajo', color: '#d4e5f6' }));
+
+    expect(await getLabels()).toEqual([{ id: 1, name: 'trabajo', color: '#a1b2c3' }]);
+  });
+
+  it.each([
+    ['name ausente', {}],
+    ['name vacío', { name: '', color: '#a1b2c3' }],
+    ['name con solo espacios', { name: '   ', color: '#a1b2c3' }],
+    ['name que no es string', { name: 42, color: '#a1b2c3' }],
+  ])('POST /labels con %s responde 400 invalid_name', async (_caso, body) => {
+    const res = await postLabel(JSON.stringify(body));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_name' });
+  });
+
+  it.each([
+    ['body que no es JSON', '{no es json'],
+    ['body vacío', ''],
+    ['body que no es un objeto', '["trabajo"]'],
+  ])('POST /labels con %s responde 400 invalid_body', async (_caso, body) => {
+    const res = await postLabel(body);
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_body' });
+  });
+
+  it.each([
+    ['color ausente', { name: 'trabajo' }],
+    ['color vacío', { name: 'trabajo', color: '' }],
+    ['color sin #', { name: 'trabajo', color: 'a1b2c3' }],
+    ['color con pocos dígitos', { name: 'trabajo', color: '#a1b2c' }],
+    ['color con dígitos no hexadecimales', { name: 'trabajo', color: '#g1b2c3' }],
+    ['color que no es string', { name: 'trabajo', color: 123 }],
+  ])('POST /labels con %s responde 400 invalid_color', async (_caso, body) => {
+    const res = await postLabel(JSON.stringify(body));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_color' });
+  });
+
+  it('un name válido con un color inválido responde 400 invalid_color', async () => {
+    const res = await postLabel(JSON.stringify({ name: 'trabajo', color: 'no-es-color' }));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_color' });
+  });
+
+  it('una etiqueta inválida no se crea', async () => {
+    await postLabel(JSON.stringify({ name: 'trabajo', color: 'no-es-color' }));
+
+    expect(await getLabels()).toEqual([]);
+  });
+
+  it('GET /labels devuelve un arreglo vacío al inicio', async () => {
+    expect(await getLabels()).toEqual([]);
+  });
+
+  it('GET /labels devuelve las etiquetas creadas en orden de creación', async () => {
+    await postLabel(JSON.stringify({ name: 'trabajo', color: '#a1b2c3' }));
+    await postLabel(JSON.stringify({ name: 'casa', color: '#d4e5f6' }));
+
+    expect(await getLabels()).toEqual([
+      { id: 1, name: 'trabajo', color: '#a1b2c3' },
+      { id: 2, name: 'casa', color: '#d4e5f6' },
+    ]);
+  });
+
+  it('DELETE /labels/:id borra la etiqueta y responde 204 sin cuerpo', async () => {
+    await postLabel(JSON.stringify({ name: 'trabajo', color: '#a1b2c3' }));
+
+    const res = await fetch(`${base}/labels/1`, { method: 'DELETE' });
+
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe('');
+  });
+
+  it('después de borrar, la etiqueta desaparece de GET /labels', async () => {
+    await postLabel(JSON.stringify({ name: 'trabajo', color: '#a1b2c3' }));
+    await postLabel(JSON.stringify({ name: 'casa', color: '#d4e5f6' }));
+
+    await fetch(`${base}/labels/1`, { method: 'DELETE' });
+
+    expect(await getLabels()).toEqual([{ id: 2, name: 'casa', color: '#d4e5f6' }]);
+  });
+
+  it('DELETE /labels/:id responde 400 invalid_id si el id no es un entero positivo', async () => {
+    for (const id of ['abc', '0', '-1', '1.5']) {
+      const res = await fetch(`${base}/labels/${id}`, { method: 'DELETE' });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'invalid_id' });
+    }
+  });
+
+  it('DELETE /labels/:id responde 404 not_found si la etiqueta no existe', async () => {
+    const res = await fetch(`${base}/labels/999`, { method: 'DELETE' });
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('un id inválido no borra ninguna etiqueta', async () => {
+    await postLabel(JSON.stringify({ name: 'trabajo', color: '#a1b2c3' }));
+
+    await fetch(`${base}/labels/abc`, { method: 'DELETE' });
+
+    expect(await getLabels()).toHaveLength(1);
+  });
+
+  it('borrar una etiqueta la quita de las tareas en GET /todos y GET /todos/:id', async () => {
+    const todo = addTodo('Comprar pan');
+    await postLabel(JSON.stringify({ name: 'trabajo', color: '#a1b2c3' }));
+    await fetch(`${base}/todos/${todo.id}/labels/1`, { method: 'POST' });
+
+    await fetch(`${base}/labels/1`, { method: 'DELETE' });
+
+    const list = await getTodos();
+    expect(list[0]?.labels).toEqual([]);
+
+    const res = await fetch(`${base}/todos/${todo.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { labels: Label[] };
+    expect(body.labels).toEqual([]);
+  });
+});
+
 describe('etiquetas de una tarea', () => {
   // Crea una etiqueta y falla el test si no se pudo crear, para no tener que
   // comprobar el null en cada uso.
