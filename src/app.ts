@@ -16,6 +16,13 @@ const json = (res: ServerResponse, status: number, body: unknown): void => {
 const todos: Todo[] = [];
 let nextTodoId = 1;
 
+export const addTodo = (title: string, done = false): Todo => {
+  const todo: Todo = { id: nextTodoId, title, done };
+  nextTodoId += 1;
+  todos.push(todo);
+  return todo;
+};
+
 const readBody = async (req: IncomingMessage): Promise<string> => {
   req.setEncoding('utf8');
   let body = '';
@@ -60,15 +67,39 @@ const createTodo = async (req: IncomingMessage, res: ServerResponse): Promise<vo
     return;
   }
 
-  const todo: Todo = { id: nextTodoId, title, done: false };
-  nextTodoId += 1;
-  todos.push(todo);
+  const todo = addTodo(title);
   json(res, 201, todo);
+};
+
+// Devuelve undefined si no viene el parámetro `done`, el booleano a filtrar
+// si vale "true" o "false", y 'invalid' en cualquier otro caso.
+const parseDone = (url: URL): boolean | 'invalid' | undefined => {
+  const raw = url.searchParams.get('done');
+  if (raw === null) return undefined;
+  if (raw !== 'true' && raw !== 'false') return 'invalid';
+  return raw === 'true';
+};
+
+const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const done = parseDone(url);
+
+  if (done === 'invalid') {
+    json(res, 400, { error: 'invalid_done' });
+    return;
+  }
+
+  if (done === undefined) {
+    json(res, 200, todos);
+    return;
+  }
+
+  json(res, 200, todos.filter((todo) => todo.done === done));
 };
 
 const routes: Record<string, Handler> = {
   'GET /health': (_req, res) => json(res, 200, { status: 'ok' }),
-  'GET /todos': (_req, res) => json(res, 200, todos),
+  'GET /todos': (req, res) => listTodos(req, res),
   'POST /todos': (req, res) => {
     void createTodo(req, res);
   },
