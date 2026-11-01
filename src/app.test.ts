@@ -191,6 +191,88 @@ describe('filtrado de tareas por done', () => {
   });
 });
 
+describe('paginación de tareas', () => {
+  it('GET /todos?limit=2&offset=1 devuelve como máximo 2 tareas empezando en la segunda', async () => {
+    addTodo('Primera');
+    addTodo('Segunda');
+    addTodo('Tercera');
+
+    const res = await fetch(`${base}/todos?limit=2&offset=1`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Segunda', 'Tercera']);
+  });
+
+  it('GET /todos?limit=1 devuelve solo la primera tarea', async () => {
+    addTodo('Primera');
+    addTodo('Segunda');
+
+    const res = await fetch(`${base}/todos?limit=1`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Primera']);
+  });
+
+  it('GET /todos?offset=2 salta las dos primeras tareas', async () => {
+    addTodo('Primera');
+    addTodo('Segunda');
+    addTodo('Tercera');
+
+    const res = await fetch(`${base}/todos?offset=2`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Tercera']);
+  });
+
+  it('sin limit ni offset devuelve todas las tareas', async () => {
+    addTodo('Primera');
+    addTodo('Segunda');
+    addTodo('Tercera');
+
+    const body = await getTodos();
+    expect(body.map((todo) => todo.title)).toEqual(['Primera', 'Segunda', 'Tercera']);
+  });
+
+  it('la paginación se combina con el filtro done', async () => {
+    addTodo('Completada A', true);
+    addTodo('Pendiente A');
+    addTodo('Completada B', true);
+
+    const res = await fetch(`${base}/todos?done=true&limit=1&offset=1`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; done: boolean }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Completada B']);
+  });
+
+  it('un offset mayor que la cantidad de tareas devuelve un arreglo vacío', async () => {
+    addTodo('Primera');
+
+    const res = await fetch(`${base}/todos?limit=2&offset=5`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it.each([
+    ['limit no numérico', 'limit=abc'],
+    ['limit decimal', 'limit=1.5'],
+    ['limit negativo', 'limit=-1'],
+    ['limit mayor que 100', 'limit=101'],
+    ['offset no numérico', 'offset=abc'],
+    ['offset decimal', 'offset=1.5'],
+    ['offset negativo', 'offset=-1'],
+  ])('%s responde 400 invalid_pagination', async (_caso, query) => {
+    const res = await fetch(`${base}/todos?${query}`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_pagination' });
+  });
+
+  it('limit=100 es válido', async () => {
+    const res = await fetch(`${base}/todos?limit=100`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+});
+
 describe('búsqueda de tareas por texto', () => {
   it('GET /todos?q=pan devuelve solo las tareas cuyo título contiene "pan"', async () => {
     addTodo('Comprar pan');
@@ -243,6 +325,17 @@ describe('búsqueda de tareas por texto', () => {
     const res = await fetch(`${base}/todos?q=zzz`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual([]);
+  });
+
+  it('la búsqueda se combina con la paginación: el limit cuenta sobre las coincidencias', async () => {
+    addTodo('Comprar pan');
+    addTodo('Hacer pan');
+    addTodo('Comprar leche');
+
+    const res = await fetch(`${base}/todos?q=pan&limit=1&offset=1`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Hacer pan']);
   });
 });
 
