@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { labelsForTodo, type Label } from './labels.js';
 
 // Parámetros capturados por la ruta, p. ej. `{ id: '3' }` para `GET /todos/:id`.
 export type RouteParams = Record<string, string>;
@@ -63,6 +64,13 @@ export const resetTodos = (): void => {
   todos.length = 0;
   nextTodoId = 1;
 };
+
+// Serializa una tarea junto con sus etiquetas, para las respuestas que
+// devuelven tareas.
+const todoResponse = (todo: Todo): Todo & { labels: Label[] } => ({
+  ...todo,
+  labels: labelsForTodo(todo.id),
+});
 
 const readBody = async (req: IncomingMessage): Promise<string> => {
   req.setEncoding('utf8');
@@ -128,7 +136,7 @@ const createTodo = async (req: IncomingMessage, res: ServerResponse): Promise<vo
   }
 
   const todo = addTodo(title, false, priority);
-  json(res, 201, todo);
+  json(res, 201, todoResponse(todo));
 };
 
 // Devuelve undefined si no viene el parámetro `done`, el booleano a filtrar
@@ -233,7 +241,7 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
   const { limit, offset } = pagination;
   const end = limit === null ? undefined : offset + limit;
 
-  json(res, 200, result.slice(offset, end));
+  json(res, 200, result.slice(offset, end).map(todoResponse));
 };
 
 const deleteAllTodos = (_req: IncomingMessage, res: ServerResponse): void => {
@@ -257,7 +265,7 @@ const getLatestTodo = (_req: IncomingMessage, res: ServerResponse): void => {
     return;
   }
 
-  json(res, 200, latest);
+  json(res, 200, todoResponse(latest));
 };
 
 // Devuelve el id como entero positivo, o null si no lo es.
@@ -281,7 +289,7 @@ const getTodoById = (params: RouteParams, res: ServerResponse): void => {
     return;
   }
 
-  json(res, 200, todo);
+  json(res, 200, todoResponse(todo));
 };
 
 // Campos que se pueden cambiar con PATCH /todos/:id. Los ausentes no se tocan.
@@ -361,7 +369,7 @@ const patchTodo = async (
   if (patch.title !== undefined) todo.title = patch.title;
   if (patch.done !== undefined) todo.done = patch.done;
 
-  json(res, 200, todo);
+  json(res, 200, todoResponse(todo));
 };
 
 const deleteTodoById = (params: RouteParams, res: ServerResponse): void => {
