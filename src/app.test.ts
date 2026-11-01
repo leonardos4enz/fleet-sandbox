@@ -34,6 +34,14 @@ describe('app', () => {
   });
 });
 
+describe('stats sin tareas', () => {
+  it('GET /stats devuelve total, done y pending en cero', async () => {
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ total: 0, done: 0, pending: 0 });
+  });
+});
+
 describe('todos', () => {
   it('GET /todos devuelve un arreglo vacío al inicio', async () => {
     const res = await fetch(`${base}/todos`);
@@ -127,5 +135,29 @@ describe('filtrado de tareas por done', () => {
     const res = await fetch(`${base}/todos?done=otracosa`);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: 'invalid_done' });
+  });
+});
+
+describe('stats con tareas', () => {
+  beforeAll(async () => {
+    await postTodo(JSON.stringify({ title: 'Tarea pendiente A' }));
+    await postTodo(JSON.stringify({ title: 'Tarea pendiente B' }));
+  });
+
+  it('GET /stats cuenta las tareas creadas con POST /todos', async () => {
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ total: 4, done: 1, pending: 3 });
+  });
+
+  it('GET /stats coincide con el total de tareas listadas en GET /todos', async () => {
+    const res = await fetch(`${base}/todos`);
+    expect(res.status).toBe(200);
+    const todos = (await res.json()) as Array<{ done: boolean }>;
+    const statsRes = await fetch(`${base}/stats`);
+    const stats = (await statsRes.json()) as { total: number; done: number; pending: number };
+    expect(stats.total).toBe(todos.length);
+    expect(stats.done).toBe(todos.filter((todo) => todo.done).length);
+    expect(stats.pending).toBe(todos.filter((todo) => !todo.done).length);
   });
 });
