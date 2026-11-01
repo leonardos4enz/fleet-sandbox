@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { labelsForTodo, type Label } from './labels.js';
+import {
+  assignLabelToTodo,
+  clearTodoLabels,
+  findLabelById,
+  labelsForTodo,
+  removeLabelFromTodo,
+  type Label,
+} from './labels.js';
 
 // Parámetros capturados por la ruta, p. ej. `{ id: '3' }` para `GET /todos/:id`.
 export type RouteParams = Record<string, string>;
@@ -246,6 +253,9 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
 
 const deleteAllTodos = (_req: IncomingMessage, res: ServerResponse): void => {
   const deleted = todos.length;
+  // Se limpian las etiquetas de las tareas borradas para que un id de tarea
+  // reutilizado no herede etiquetas.
+  for (const todo of todos) clearTodoLabels(todo.id);
   todos.length = 0;
   json(res, 200, { deleted });
 };
@@ -385,7 +395,60 @@ const deleteTodoById = (params: RouteParams, res: ServerResponse): void => {
     return;
   }
 
+  // Se limpian las etiquetas de la tarea borrada para que un id de tarea
+  // reutilizado no herede etiquetas.
+  clearTodoLabels(id);
   todos.splice(index, 1);
+  noContent(res);
+};
+
+// Asigna una etiqueta a una tarea. Es idempotente: si la tarea ya tenía la
+// etiqueta, la respuesta es la misma y la etiqueta no se duplica.
+const assignTodoLabel = (params: RouteParams, res: ServerResponse): void => {
+  const todoId = parseTodoId(params['id'] ?? '');
+  const labelId = parseTodoId(params['labelId'] ?? '');
+  if (todoId === null || labelId === null) {
+    json(res, 400, { error: 'invalid_id' });
+    return;
+  }
+
+  const todo = todos.find((candidate) => candidate.id === todoId);
+  if (!todo) {
+    json(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  if (findLabelById(labelId) === undefined) {
+    json(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  assignLabelToTodo(todoId, labelId);
+  json(res, 200, todoResponse(todo));
+};
+
+// Quita una etiqueta de una tarea. Es idempotente: si la tarea no tenía esa
+// etiqueta, la respuesta es la misma.
+const removeTodoLabel = (params: RouteParams, res: ServerResponse): void => {
+  const todoId = parseTodoId(params['id'] ?? '');
+  const labelId = parseTodoId(params['labelId'] ?? '');
+  if (todoId === null || labelId === null) {
+    json(res, 400, { error: 'invalid_id' });
+    return;
+  }
+
+  const todo = todos.find((candidate) => candidate.id === todoId);
+  if (!todo) {
+    json(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  if (findLabelById(labelId) === undefined) {
+    json(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  removeLabelFromTodo(todoId, labelId);
   noContent(res);
 };
 
@@ -404,6 +467,8 @@ const routes: Record<string, Handler> = {
   },
   'DELETE /todos': (req, res) => deleteAllTodos(req, res),
   'DELETE /todos/:id': (_req, res, params) => deleteTodoById(params, res),
+  'POST /todos/:id/labels/:labelId': (_req, res, params) => assignTodoLabel(params, res),
+  'DELETE /todos/:id/labels/:labelId': (_req, res, params) => removeTodoLabel(params, res),
 };
 
 // Un segmento de ruta que empieza por `:` captura el valor de ese parámetro.
