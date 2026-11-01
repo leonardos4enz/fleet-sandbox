@@ -273,6 +273,72 @@ describe('paginación de tareas', () => {
   });
 });
 
+describe('búsqueda de tareas por texto', () => {
+  it('GET /todos?q=pan devuelve solo las tareas cuyo título contiene "pan"', async () => {
+    addTodo('Comprar pan');
+    addTodo('Hacer tortillas');
+    addTodo('Comprar leche');
+
+    const res = await fetch(`${base}/todos?q=pan`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({ title: 'Comprar pan' });
+  });
+
+  it('GET /todos?q=busca sin distinguir mayúsculas', async () => {
+    addTodo('Comprar PAN');
+    addTodo('Pan integral');
+    addTodo('Comprar leche');
+
+    const res = await fetch(`${base}/todos?q=pan`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title).sort()).toEqual(['Comprar PAN', 'Pan integral']);
+  });
+
+  it('GET /todos?q=combina con el filtro done', async () => {
+    addTodo('Comprar pan', true);
+    addTodo('Pan para la cena', false);
+    addTodo('Comprar leche', false);
+
+    const res = await fetch(`${base}/todos?q=pan&done=false`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; done: boolean }>;
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({ title: 'Pan para la cena', done: false });
+  });
+
+  it('GET /todos?q=vacío se comporta como si no viniera', async () => {
+    addTodo('Comprar pan');
+    addTodo('Comprar leche');
+
+    const res = await fetch(`${base}/todos?q=`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title).sort()).toEqual(['Comprar leche', 'Comprar pan']);
+  });
+
+  it('GET /todos?q=sin resultados devuelve un arreglo vacío', async () => {
+    addTodo('Comprar pan');
+
+    const res = await fetch(`${base}/todos?q=zzz`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([]);
+  });
+
+  it('la búsqueda se combina con la paginación: el limit cuenta sobre las coincidencias', async () => {
+    addTodo('Comprar pan');
+    addTodo('Hacer pan');
+    addTodo('Comprar leche');
+
+    const res = await fetch(`${base}/todos?q=pan&limit=1&offset=1`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Hacer pan']);
+  });
+});
+
 describe('DELETE /todos', () => {
   it('borra todas las tareas y responde 200 con la cantidad borrada', async () => {
     addTodo('Primera');

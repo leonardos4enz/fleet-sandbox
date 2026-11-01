@@ -96,6 +96,15 @@ const parseDone = (url: URL): boolean | 'invalid' | undefined => {
   return raw === 'true';
 };
 
+// Devuelve undefined si no viene el parámetro `q` o viene vacío (solo
+// espacios), y el texto de búsqueda en minúsculas en cualquier otro caso.
+const parseQuery = (url: URL): string | undefined => {
+  const raw = url.searchParams.get('q');
+  if (raw === null) return undefined;
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
 // Máximo de tareas que se pueden pedir con `limit`.
 const MAX_LIMIT = 100;
 
@@ -138,6 +147,7 @@ const parsePagination = (url: URL): Pagination | 'invalid' => {
 const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const done = parseDone(url);
+  const q = parseQuery(url);
 
   if (done === 'invalid') {
     json(res, 400, { error: 'invalid_done' });
@@ -151,11 +161,18 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
     return;
   }
 
-  const filtered = done === undefined ? todos : todos.filter((todo) => todo.done === done);
+  let result = todos;
+  if (done !== undefined) {
+    result = result.filter((todo) => todo.done === done);
+  }
+  if (q !== undefined) {
+    result = result.filter((todo) => todo.title.toLowerCase().includes(q));
+  }
+
   const { limit, offset } = pagination;
   const end = limit === null ? undefined : offset + limit;
 
-  json(res, 200, filtered.slice(offset, end));
+  json(res, 200, result.slice(offset, end));
 };
 
 const deleteAllTodos = (_req: IncomingMessage, res: ServerResponse): void => {
