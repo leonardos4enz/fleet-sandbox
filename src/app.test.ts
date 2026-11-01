@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { addTodo, app, resetTodos } from './app.js';
-import { assignLabelToTodo, createLabel, resetLabels, type Label } from './labels.js';
+import { assignLabelToTodo, createLabel, labelsForTodo, resetLabels, type Label } from './labels.js';
 
 // La versión esperada se lee del package.json real, no se escribe a mano,
 // para que el test siga siendo cierto cuando se suba la versión.
@@ -931,6 +931,190 @@ describe('DELETE /todos/:id', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ deleted: 2 });
     expect(await getTodos()).toEqual([]);
+  });
+});
+
+describe('etiquetas de una tarea', () => {
+  // Crea una etiqueta y falla el test si no se pudo crear, para no tener que
+  // comprobar el null en cada uso.
+  const makeLabel = (name: string, color: string): Label => {
+    const label = createLabel(name, color);
+    if (label === null) throw new Error(`no se pudo crear la etiqueta ${name}`);
+    return label;
+  };
+
+  const assignLabel = (todoId: number | string, labelId: number | string): Promise<Response> =>
+    fetch(`${base}/todos/${todoId}/labels/${labelId}`, { method: 'POST' });
+
+  const removeLabel = (todoId: number | string, labelId: number | string): Promise<Response> =>
+    fetch(`${base}/todos/${todoId}/labels/${labelId}`, { method: 'DELETE' });
+
+  it('POST asigna la etiqueta y responde 200 con la tarea actualizada', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+
+    const res = await assignLabel(todo.id, label.id);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      id: todo.id,
+      title: 'Comprar pan',
+      done: false,
+      priority: 'medium',
+      labels: [{ id: label.id, name: 'urgente', color: '#ff0000' }],
+    });
+  });
+
+  it('asignar la misma etiqueta dos veces no la duplica', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+
+    await assignLabel(todo.id, label.id);
+    const res = await assignLabel(todo.id, label.id);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { labels: Label[] };
+    expect(body.labels).toEqual([{ id: label.id, name: 'urgente', color: '#ff0000' }]);
+  });
+
+  it('una tarea puede tener varias etiquetas y GET /todos/:id las devuelve todas', async () => {
+    const todo = addTodo('Comprar pan');
+    const primera = makeLabel('urgente', '#ff0000');
+    const segunda = makeLabel('casa', '#00ff00');
+
+    await assignLabel(todo.id, primera.id);
+    await assignLabel(todo.id, segunda.id);
+
+    const res = await fetch(`${base}/todos/${todo.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { labels: Label[] };
+    expect(body.labels).toEqual([
+      { id: primera.id, name: 'urgente', color: '#ff0000' },
+      { id: segunda.id, name: 'casa', color: '#00ff00' },
+    ]);
+  });
+
+  it('POST con id de tarea inválido responde 400 invalid_id', async () => {
+    const label = makeLabel('urgente', '#ff0000');
+    addTodo('Comprar pan');
+
+    for (const id of ['abc', '0', '-1', '1.5']) {
+      const res = await assignLabel(id, label.id);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'invalid_id' });
+    }
+  });
+
+  it('POST con id de etiqueta inválido responde 400 invalid_id', async () => {
+    const todo = addTodo('Comprar pan');
+
+    for (const labelId of ['abc', '0', '-1', '1.5']) {
+      const res = await assignLabel(todo.id, labelId);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: 'invalid_id' });
+    }
+  });
+
+  it('POST con una tarea inexistente responde 404 not_found', async () => {
+    const label = makeLabel('urgente', '#ff0000');
+
+    const res = await assignLabel(999, label.id);
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('POST con una etiqueta inexistente responde 404 not_found', async () => {
+    const todo = addTodo('Comprar pan');
+
+    const res = await assignLabel(todo.id, 999);
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('DELETE quita la etiqueta y responde 204 sin cuerpo', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+    await assignLabel(todo.id, label.id);
+
+    const res = await removeLabel(todo.id, label.id);
+
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe('');
+  });
+
+  it('tras DELETE la etiqueta desaparece de labels de la tarea', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+    await assignLabel(todo.id, label.id);
+
+    await removeLabel(todo.id, label.id);
+
+    const res = await fetch(`${base}/todos/${todo.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { labels: Label[] };
+    expect(body.labels).toEqual([]);
+  });
+
+  it('DELETE de una etiqueta que la tarea no tiene responde 204', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+
+    const res = await removeLabel(todo.id, label.id);
+
+    expect(res.status).toBe(204);
+    expect(await res.text()).toBe('');
+  });
+
+  it('DELETE con una tarea o etiqueta inexistente responde 404 not_found', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+
+    const missingTodo = await removeLabel(999, label.id);
+    expect(missingTodo.status).toBe(404);
+    expect(await missingTodo.json()).toEqual({ error: 'not_found' });
+
+    const missingLabel = await removeLabel(todo.id, 999);
+    expect(missingLabel.status).toBe(404);
+    expect(await missingLabel.json()).toEqual({ error: 'not_found' });
+  });
+
+  it('DELETE con id inválido responde 400 invalid_id', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+
+    const badTodo = await removeLabel('abc', label.id);
+    expect(badTodo.status).toBe(400);
+    expect(await badTodo.json()).toEqual({ error: 'invalid_id' });
+
+    const badLabel = await removeLabel(todo.id, 'abc');
+    expect(badLabel.status).toBe(400);
+    expect(await badLabel.json()).toEqual({ error: 'invalid_id' });
+  });
+
+  it('DELETE /todos/:id borra también las etiquetas de la tarea', async () => {
+    const todo = addTodo('Comprar pan');
+    const label = makeLabel('urgente', '#ff0000');
+    await assignLabel(todo.id, label.id);
+
+    await fetch(`${base}/todos/${todo.id}`, { method: 'DELETE' });
+
+    // La tarea ya no tiene etiquetas asignadas: un id reutilizado no las hereda.
+    expect(labelsForTodo(todo.id)).toEqual([]);
+  });
+
+  it('DELETE /todos borra también las etiquetas de todas las tareas', async () => {
+    const primera = addTodo('Primera');
+    const segunda = addTodo('Segunda');
+    const label = makeLabel('urgente', '#ff0000');
+    await assignLabel(primera.id, label.id);
+    await assignLabel(segunda.id, label.id);
+
+    await fetch(`${base}/todos`, { method: 'DELETE' });
+
+    expect(labelsForTodo(primera.id)).toEqual([]);
+    expect(labelsForTodo(segunda.id)).toEqual([]);
   });
 });
 
