@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { app } from './app.js';
+import { addTodo, app } from './app.js';
 
 let server: Server;
 let base: string;
@@ -88,5 +88,44 @@ describe('todos', () => {
     const body = (await res.json()) as Array<{ title: string }>;
     expect(body).toHaveLength(1);
     expect(body[0]?.title).toBe('Comprar pan');
+  });
+});
+
+describe('filtrado de tareas por done', () => {
+  beforeAll(() => {
+    addTodo('Tarea completada', true);
+  });
+
+  it('GET /todos?done=true devuelve solo las tareas con done=true', async () => {
+    const res = await fetch(`${base}/todos?done=true`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; done: boolean }>;
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({ title: 'Tarea completada', done: true });
+  });
+
+  it('GET /todos?done=false devuelve solo las tareas con done=false', async () => {
+    const res = await fetch(`${base}/todos?done=false`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; done: boolean }>;
+    expect(body.length).toBeGreaterThan(0);
+    expect(body.every((todo) => todo.done === false)).toBe(true);
+    expect(body.map((todo) => todo.title)).toContain('Comprar pan');
+    expect(body.map((todo) => todo.title)).not.toContain('Tarea completada');
+  });
+
+  it('GET /todos sin parámetro sigue devolviendo todas las tareas', async () => {
+    const res = await fetch(`${base}/todos`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; done: boolean }>;
+    const titles = body.map((todo) => todo.title);
+    expect(titles).toContain('Comprar pan');
+    expect(titles).toContain('Tarea completada');
+  });
+
+  it('GET /todos?done=otracosa responde 400 invalid_done', async () => {
+    const res = await fetch(`${base}/todos?done=otracosa`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_done' });
   });
 });
