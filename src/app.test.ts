@@ -33,10 +33,17 @@ const postTodo = (body: string): Promise<Response> =>
     body,
   });
 
-const getTodos = async (): Promise<Array<{ id: number; title: string; done: boolean }>> => {
+const getTodos = async (): Promise<
+  Array<{ id: number; title: string; done: boolean; priority: string }>
+> => {
   const res = await fetch(`${base}/todos`);
   expect(res.status).toBe(200);
-  return (await res.json()) as Array<{ id: number; title: string; done: boolean }>;
+  return (await res.json()) as Array<{
+    id: number;
+    title: string;
+    done: boolean;
+    priority: string;
+  }>;
 };
 
 describe('app', () => {
@@ -94,7 +101,12 @@ describe('todos', () => {
   it('POST /todos crea una tarea y responde 201', async () => {
     const res = await postTodo(JSON.stringify({ title: 'Comprar pan' }));
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { id: number; title: string; done: boolean };
+    const body = (await res.json()) as {
+      id: number;
+      title: string;
+      done: boolean;
+      priority: string;
+    };
     expect(body.title).toBe('Comprar pan');
     expect(body.done).toBe(false);
     expect(typeof body.id).toBe('number');
@@ -144,6 +156,141 @@ describe('todos', () => {
 
     expect(body).toHaveLength(1);
     expect(body[0]?.title).toBe('Comprar pan');
+  });
+});
+
+describe('prioridad de las tareas', () => {
+  it('POST /todos sin priority crea la tarea con priority "medium"', async () => {
+    const res = await postTodo(JSON.stringify({ title: 'Comprar pan' }));
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { title: string; priority: string };
+    expect(body.priority).toBe('medium');
+  });
+
+  it.each(['low', 'medium', 'high'])(
+    'POST /todos con priority "%s" guarda esa prioridad',
+    async (priority) => {
+      const res = await postTodo(JSON.stringify({ title: 'Tarea', priority }));
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as { title: string; priority: string };
+      expect(body.priority).toBe(priority);
+    },
+  );
+
+  it.each([
+    ['prioridad desconocida', 'urgent'],
+    ['prioridad vacía', ''],
+    ['prioridad con mayúsculas', 'HIGH'],
+    ['prioridad numérica', 3],
+    ['prioridad nula', null],
+  ])('POST /todos con %s responde 400 invalid_priority', async (_caso, priority) => {
+    const res = await postTodo(JSON.stringify({ title: 'Tarea', priority }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_priority' });
+  });
+
+  it('una prioridad inválida no crea la tarea', async () => {
+    await postTodo(JSON.stringify({ title: 'Tarea', priority: 'urgent' }));
+
+    expect(await getTodos()).toEqual([]);
+  });
+
+  it('GET /todos devuelve la prioridad de cada tarea', async () => {
+    await postTodo(JSON.stringify({ title: 'Urgente', priority: 'high' }));
+    await postTodo(JSON.stringify({ title: 'Normal' }));
+
+    const body = await getTodos();
+
+    expect(body.map((todo) => todo.priority)).toEqual(['high', 'medium']);
+  });
+
+  it('GET /todos/:id devuelve la prioridad de la tarea', async () => {
+    const todo = addTodo('Urgente', false, 'high');
+
+    const res = await fetch(`${base}/todos/${todo.id}`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string; priority: string };
+    expect(body.priority).toBe('high');
+  });
+
+  it('GET /todos/latest devuelve la prioridad de la última tarea', async () => {
+    await postTodo(JSON.stringify({ title: 'Urgente', priority: 'high' }));
+
+    const res = await fetch(`${base}/todos/latest`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { title: string; priority: string };
+    expect(body.priority).toBe('high');
+  });
+
+  it('GET /todos?priority=high devuelve solo las tareas con priority high', async () => {
+    addTodo('Urgente', false, 'high');
+    addTodo('Normal', false, 'medium');
+    addTodo('Trivial', false, 'low');
+
+    const res = await fetch(`${base}/todos?priority=high`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; priority: string }>;
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({ title: 'Urgente', priority: 'high' });
+  });
+
+  it('GET /todos?priority=low devuelve solo las tareas con priority low', async () => {
+    addTodo('Urgente', false, 'high');
+    addTodo('Normal', false, 'medium');
+    addTodo('Trivial', false, 'low');
+
+    const res = await fetch(`${base}/todos?priority=low`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; priority: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Trivial']);
+  });
+
+  it('GET /todos?priority=high se combina con el filtro done', async () => {
+    addTodo('Urgente completada', true, 'high');
+    addTodo('Urgente pendiente', false, 'high');
+    addTodo('Normal completada', true, 'medium');
+
+    const res = await fetch(`${base}/todos?priority=high&done=false`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; priority: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Urgente pendiente']);
+  });
+
+  it('GET /todos?priority=high se combina con la búsqueda por texto', async () => {
+    addTodo('Comprar pan', false, 'high');
+    addTodo('Comprar leche', false, 'high');
+    addTodo('Pan integral', false, 'low');
+
+    const res = await fetch(`${base}/todos?priority=high&q=pan`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; priority: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Comprar pan']);
+  });
+
+  it('GET /todos?priority=high se combina con la paginación', async () => {
+    addTodo('Primera', false, 'high');
+    addTodo('Segunda', false, 'high');
+    addTodo('Tercera', false, 'medium');
+
+    const res = await fetch(`${base}/todos?priority=high&limit=1&offset=1`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Array<{ title: string; priority: string }>;
+    expect(body.map((todo) => todo.title)).toEqual(['Segunda']);
+  });
+
+  it('GET /todos sin priority sigue devolviendo todas las prioridades', async () => {
+    addTodo('Urgente', false, 'high');
+    addTodo('Trivial', false, 'low');
+
+    const body = await getTodos();
+
+    expect(body.map((todo) => todo.priority)).toEqual(['high', 'low']);
+  });
+
+  it('GET /todos?priority=desconocida responde 400 invalid_priority', async () => {
+    const res = await fetch(`${base}/todos?priority=urgent`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: 'invalid_priority' });
   });
 });
 
