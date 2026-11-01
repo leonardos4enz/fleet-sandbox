@@ -105,6 +105,45 @@ const parseQuery = (url: URL): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
+// Máximo de tareas que se pueden pedir con `limit`.
+const MAX_LIMIT = 100;
+
+type Pagination = {
+  limit: number | null;
+  offset: number;
+};
+
+// Devuelve el número si el texto es un entero >= 0, y null en cualquier
+// otro caso (no numérico, con decimales, negativo o fuera del rango seguro).
+const parseNonNegativeInt = (raw: string): number | null => {
+  if (!/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
+};
+
+// Devuelve 'invalid' si `limit` o `offset` no son enteros >= 0 (o si `limit`
+// supera el máximo permitido); si no, los valores ya validados.
+const parsePagination = (url: URL): Pagination | 'invalid' => {
+  const limitRaw = url.searchParams.get('limit');
+  const offsetRaw = url.searchParams.get('offset');
+
+  let limit: number | null = null;
+  if (limitRaw !== null) {
+    const parsed = parseNonNegativeInt(limitRaw);
+    if (parsed === null || parsed > MAX_LIMIT) return 'invalid';
+    limit = parsed;
+  }
+
+  let offset = 0;
+  if (offsetRaw !== null) {
+    const parsed = parseNonNegativeInt(offsetRaw);
+    if (parsed === null) return 'invalid';
+    offset = parsed;
+  }
+
+  return { limit, offset };
+};
+
 const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const done = parseDone(url);
@@ -112,6 +151,13 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
 
   if (done === 'invalid') {
     json(res, 400, { error: 'invalid_done' });
+    return;
+  }
+
+  const pagination = parsePagination(url);
+
+  if (pagination === 'invalid') {
+    json(res, 400, { error: 'invalid_pagination' });
     return;
   }
 
@@ -123,7 +169,10 @@ const listTodos = (req: IncomingMessage, res: ServerResponse): void => {
     result = result.filter((todo) => todo.title.toLowerCase().includes(q));
   }
 
-  json(res, 200, result);
+  const { limit, offset } = pagination;
+  const end = limit === null ? undefined : offset + limit;
+
+  json(res, 200, result.slice(offset, end));
 };
 
 const deleteAllTodos = (_req: IncomingMessage, res: ServerResponse): void => {
