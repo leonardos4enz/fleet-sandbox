@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
-export type Handler = (req: IncomingMessage, res: ServerResponse) => void;
+// Parámetros capturados por la ruta, p. ej. `{ id: '3' }` para `GET /todos/:id`.
+export type RouteParams = Record<string, string>;
+
+export type Handler = (req: IncomingMessage, res: ServerResponse, params: RouteParams) => void;
 
 export type Todo = {
   id: number;
@@ -137,11 +140,36 @@ const getLatestTodo = (_req: IncomingMessage, res: ServerResponse): void => {
   json(res, 200, latest);
 };
 
+// Devuelve el id como entero positivo, o null si no lo es.
+// Solo se aceptan dígitos: "0", "-1", "1.5", "abc" o "" no son ids válidos.
+const parseTodoId = (raw: string): number | null => {
+  if (!/^\d+$/.test(raw)) return null;
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+};
+
+const getTodoById = (params: RouteParams, res: ServerResponse): void => {
+  const id = parseTodoId(params['id'] ?? '');
+  if (id === null) {
+    json(res, 400, { error: 'invalid_id' });
+    return;
+  }
+
+  const todo = todos.find((candidate) => candidate.id === id);
+  if (!todo) {
+    json(res, 404, { error: 'not_found' });
+    return;
+  }
+
+  json(res, 200, todo);
+};
+
 const routes: Record<string, Handler> = {
   'GET /health': (_req, res) => json(res, 200, { status: 'ok' }),
   'GET /version': (_req, res) => json(res, 200, { version }),
   'GET /todos': (req, res) => listTodos(req, res),
   'GET /todos/latest': (_req, res) => getLatestTodo(_req, res),
+  'GET /todos/:id': (_req, res, params) => getTodoById(params, res),
   'GET /stats': (req, res) => getStats(req, res),
   'POST /todos': (req, res) => {
     void createTodo(req, res);
@@ -149,9 +177,62 @@ const routes: Record<string, Handler> = {
   'DELETE /todos': (req, res) => deleteAllTodos(req, res),
 };
 
-export const app: Handler = (req, res) => {
+// Un segmento de ruta que empieza por `:` captura el valor de ese parámetro.
+const PARAM_PREFIX = ':';
+
+// Decodifica un segmento capturado. Si el escape es inválido se devuelve el
+// texto tal cual, para que lo rechace la validación del parámetro.
+const decodeSegment = (raw: string): string => {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+};
+
+// Busca la ruta que corresponde al verbo HTTP y al camino pedido. Las rutas
+// exactas ganan siempre sobre las que tienen parámetros, así que
+// `/todos/latest` no se confunde con `/todos/:id`.
+const matchRoute = (
+  method: string,
+  path: string,
+): { handler: Handler; params: RouteParams } | null => {
+  const exact = routes[`${method} ${path}`];
+  if (exact) return { handler: exact, params: {} };
+
+  const pathSegments = path.split('/');
+
+  for (const [routeKey, handler] of Object.entries(routes)) {
+    const separator = routeKey.indexOf(' ');
+    const routeMethod = routeKey.slice(0, separator);
+    const routeSegments = routeKey.slice(separator + 1).split('/');
+    if (routeMethod !== method) continue;
+    if (routeSegments.length !== pathSegments.length) continue;
+
+    const params: RouteParams = {};
+    let matched = true;
+
+    for (let index = 0; index < routeSegments.length; index += 1) {
+      const routeSegment = routeSegments[index] ?? '';
+      const pathSegment = pathSegments[index] ?? '';
+
+      if (routeSegment.startsWith(PARAM_PREFIX)) {
+        params[routeSegment.slice(PARAM_PREFIX.length)] = decodeSegment(pathSegment);
+      } else if (routeSegment !== pathSegment) {
+        matched = false;
+        break;
+      }
+    }
+
+    if (matched) return { handler, params };
+  }
+
+  return null;
+};
+
+export const app = (req: IncomingMessage, res: ServerResponse): void => {
   const path = new URL(req.url ?? '/', 'http://localhost').pathname;
-  const route = routes[`${req.method ?? 'GET'} ${path}`];
-  if (route) route(req, res);
+  const match = matchRoute(req.method ?? 'GET', path);
+  if (match) match.handler(req, res, match.params);
   else json(res, 404, { error: 'not_found' });
 };
