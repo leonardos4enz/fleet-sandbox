@@ -116,9 +116,22 @@ const getStats = (_req: IncomingMessage, res: ServerResponse): void => {
   json(res, 200, { total, done, pending: total - done });
 };
 
+// Devuelve la tarea creada más recientemente.
+// Las tareas se guardan en orden de creación, así que la última es la más reciente.
+const getLatestTodo = (_req: IncomingMessage, res: ServerResponse): void => {
+  const latest = todos[todos.length - 1];
+  if (!latest) {
+    json(res, 404, { error: 'no_todos' });
+    return;
+  }
+
+  json(res, 200, latest);
+};
+
 const routes: Record<string, Handler> = {
   'GET /health': (_req, res) => json(res, 200, { status: 'ok' }),
   'GET /todos': (req, res) => listTodos(req, res),
+  'GET /todos/latest': (_req, res) => getLatestTodo(_req, res),
   'GET /stats': (req, res) => getStats(req, res),
   'POST /todos': (req, res) => {
     void createTodo(req, res);
