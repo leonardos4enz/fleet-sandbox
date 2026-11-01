@@ -176,6 +176,46 @@ describe('filtrado de tareas por done', () => {
   });
 });
 
+describe('DELETE /todos', () => {
+  it('borra todas las tareas y responde 200 con la cantidad borrada', async () => {
+    addTodo('Primera');
+    addTodo('Segunda');
+    addTodo('Tercera');
+
+    const res = await fetch(`${base}/todos`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ deleted: 3 });
+  });
+
+  it('después de borrar, GET /todos devuelve []', async () => {
+    addTodo('Primera');
+    addTodo('Segunda');
+
+    const res = await fetch(`${base}/todos`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+
+    expect(await getTodos()).toEqual([]);
+  });
+
+  it('borrar sin tareas responde 200 con deleted 0', async () => {
+    const res = await fetch(`${base}/todos`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ deleted: 0 });
+    expect(await getTodos()).toEqual([]);
+  });
+
+  it('las tareas borradas no reaparecen en GET /stats', async () => {
+    addTodo('Tarea completada', true);
+    addTodo('Tarea pendiente');
+
+    await fetch(`${base}/todos`, { method: 'DELETE' });
+
+    const res = await fetch(`${base}/stats`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ total: 0, done: 0, pending: 0 });
+  });
+});
+
 describe('última tarea', () => {
   it('GET /todos/latest responde 404 no_todos cuando no hay tareas', async () => {
     const res = await fetch(`${base}/todos/latest`);
